@@ -1,0 +1,6 @@
+FROM moondream
+
+SYSTEM """Describe images briefly in plain English. Focus on visible objects, colors, and setting."""
+
+PARAMETER num_predict 128
+PARAMETER temperature 0.2
