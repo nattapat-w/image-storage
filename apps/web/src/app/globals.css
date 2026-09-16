@@ -1,0 +1,200 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-display);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+}
+
+/* Discord design tokens — see DESIGN.md */
+:root {
+  --background: #313338;
+  --foreground: #dbdee1;
+  --card: #2b2d31;
+  --card-foreground: #dbdee1;
+  --popover: #111214;
+  --popover-foreground: #dbdee1;
+  --primary: #5865f2;
+  --primary-foreground: #ffffff;
+  --secondary: #4e5058;
+  --secondary-foreground: #ffffff;
+  --muted: #2b2d31;
+  --muted-foreground: #949ba4;
+  --accent: #35373c;
+  --accent-foreground: #f2f3f5;
+  --destructive: #f23f43;
+  --destructive-foreground: #ffffff;
+  --border: #3f4147;
+  --input: #1e1f22;
+  --ring: #5865f2;
+  --radius: 8px;
+  --sidebar: #2b2d31;
+  --sidebar-foreground: #949ba4;
+  --sidebar-primary: #5865f2;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: rgba(79, 84, 92, 0.32);
+  --sidebar-accent-foreground: #f2f3f5;
+  --sidebar-border: #1e1f22;
+  --sidebar-ring: #5865f2;
+  --chart-1: #5865f2;
+  --chart-2: #23a55a;
+  --chart-3: #00a8fc;
+  --chart-4: #f0b232;
+  --chart-5: #f23f43;
+
+  --bg-primary: #313338;
+  --bg-secondary: #2b2d31;
+  --bg-secondary-alt: #232428;
+  --bg-tertiary: #1e1f22;
+  --bg-floating: #111214;
+  --header-primary: #f2f3f5;
+  --header-secondary: #b5bac1;
+  --text-link: #00a8fc;
+  --brand-hover: #4752c4;
+  --brand-active: #3c45a5;
+  --modifier-hover: rgba(79, 84, 92, 0.16);
+  --modifier-active: rgba(79, 84, 92, 0.24);
+  --modifier-selected: rgba(79, 84, 92, 0.48);
+  --status-online: #23a55a;
+}
+
+.dark {
+  --background: #313338;
+  --foreground: #dbdee1;
+  --card: #2b2d31;
+  --card-foreground: #dbdee1;
+  --popover: #111214;
+  --popover-foreground: #dbdee1;
+  --primary: #5865f2;
+  --primary-foreground: #ffffff;
+  --secondary: #4e5058;
+  --secondary-foreground: #ffffff;
+  --muted: #2b2d31;
+  --muted-foreground: #949ba4;
+  --accent: #35373c;
+  --accent-foreground: #f2f3f5;
+  --destructive: #f23f43;
+  --border: #3f4147;
+  --input: #1e1f22;
+  --ring: #5865f2;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+  html {
+    @apply font-sans;
+  }
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  a[href],
+  label[for],
+  summary {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+}
+
+@layer utilities {
+  .discord-label {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--header-secondary);
+  }
+
+  .discord-channel {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 1px 0;
+    padding: 6px 8px;
+    border-radius: 4px;
+    color: #949ba4;
+    font-size: 15px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 150ms ease, color 150ms ease;
+  }
+
+  .discord-channel:hover {
+    background: var(--modifier-hover);
+    color: #dbdee1;
+  }
+
+  .discord-channel-active {
+    background: var(--modifier-selected);
+    color: var(--header-primary);
+  }
+
+  .discord-channel.discord-channel-active:hover {
+    background: var(--modifier-selected);
+    color: var(--header-primary);
+  }
+
+  .discord-rail-icon {
+    display: flex;
+    width: 48px;
+    height: 48px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: var(--bg-primary);
+    color: var(--header-primary);
+    cursor: pointer;
+    transition: border-radius 200ms ease, background-color 150ms ease;
+  }
+
+  .discord-rail-icon:hover,
+  .discord-rail-icon-active {
+    border-radius: 16px;
+    background: var(--primary);
+    color: #fff;
+  }
+}
