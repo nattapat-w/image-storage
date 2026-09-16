@@ -1,10 +1,11 @@
 package dto
 
 type User struct {
-	ID          string `json:"id"`
-	Email       string `json:"email"`
-	DisplayName string `json:"displayName"`
-	CreatedAt   string `json:"createdAt"`
+	ID             string `json:"id"`
+	Email          string `json:"email"`
+	DisplayName    string `json:"displayName"`
+	AutoTagEnabled bool   `json:"autoTagEnabled"`
+	CreatedAt      string `json:"createdAt"`
 }
 
 type Folder struct {

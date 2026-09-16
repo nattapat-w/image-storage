@@ -233,6 +233,54 @@ func (r *ImageRepo) Restore(userID, id, updatedAt string) error {
 	return err
 }
 
+func (r *ImageRepo) PurgeTrash(userID string) ([]string, error) {
+	rows, err := r.store.DB.Query(
+		`SELECT storage_key FROM images WHERE user_id = ? AND deleted_at IS NOT NULL`,
+		userID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	keys := []string{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	tx, err := r.store.DB.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`DELETE FROM shares WHERE user_id = ? AND resource_type = 'image' AND resource_id IN (
+			SELECT id FROM images WHERE user_id = ? AND deleted_at IS NOT NULL
+		)`,
+		userID, userID,
+	); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(
+		`DELETE FROM images WHERE user_id = ? AND deleted_at IS NOT NULL`,
+		userID,
+	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
 func (r *ImageRepo) PurgeAll(userID string) ([]string, error) {
 	rows, err := r.store.DB.Query(`SELECT storage_key FROM images WHERE user_id = ?`, userID)
 	if err != nil {

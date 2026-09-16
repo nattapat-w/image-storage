@@ -7,6 +7,7 @@ type UserRepository interface {
 	FindByEmail(email string) (domain.User, string, error)
 	FindByID(id string) (domain.User, error)
 	UpdateProfile(id, email, displayName, updatedAt string) error
+	UpdateAutoTagEnabled(id string, enabled bool, updatedAt string) error
 	UpdatePassword(id, passwordHash, updatedAt string) error
 	Delete(id string) error
 }
@@ -43,6 +44,7 @@ type ImageRepository interface {
 	SoftDelete(userID, id, deletedAt string) error
 	Restore(userID, id, updatedAt string) error
 	PurgeAll(userID string) ([]string, error)
+	PurgeTrash(userID string) ([]string, error)
 	PermanentDelete(userID, id string) (string, error)
 	IsOwned(userID, id string) bool
 	IsInFolderTree(imageID, rootFolderID string) bool

@@ -12,11 +12,11 @@ import (
 
 func NewBlobStore(cfg appconfig.Config) (port.BlobStore, error) {
 	switch strings.ToLower(cfg.StorageDriver) {
-	case "s3", "r2", "neon":
+	case "s3", "r2", "neon", "supabase":
 		return s3store.New(cfg.S3)
 	case "local", "":
 		return local.New(cfg.StoragePath)
 	default:
-		return nil, fmt.Errorf("unknown STORAGE_DRIVER: %s (use local, neon, r2, or s3)", cfg.StorageDriver)
+		return nil, fmt.Errorf("unknown STORAGE_DRIVER: %s (use local, neon, r2, supabase, or s3)", cfg.StorageDriver)
 	}
 }

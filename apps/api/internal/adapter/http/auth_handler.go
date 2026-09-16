@@ -68,6 +68,27 @@ func (h *AuthHandler) Me(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, dto.UserFromDomain(user))
 }
 
+func (h *AuthHandler) UpdateAutoTagEnabled(w http.ResponseWriter, r *http.Request) {
+	userID, ok := jwtauth.UserIDFromContext(r.Context())
+	if !ok {
+		httpx.Error(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	var body struct {
+		Enabled bool `json:"enabled"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	user, err := h.Auth.UpdateAutoTagEnabled(userID, body.Enabled)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, dto.UserFromDomain(user))
+}
+
 func (h *AuthHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 	userID, ok := jwtauth.UserIDFromContext(r.Context())
 	if !ok {

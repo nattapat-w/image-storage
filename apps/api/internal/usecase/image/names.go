@@ -11,6 +11,30 @@ import (
 
 var numberedNameSuffix = regexp.MustCompile(`^(.+?) \((\d+)\)$`)
 
+const maxUploadFilenameLen = 180
+
+func sanitizeUploadFilename(name string) string {
+	name = strings.TrimSpace(name)
+	name = strings.ReplaceAll(name, "\x00", "")
+	name = filepath.Base(name)
+	if name == "" || name == "." {
+		return ""
+	}
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	if len(name) <= maxUploadFilenameLen {
+		return name
+	}
+	maxBaseLen := maxUploadFilenameLen - len(ext)
+	if maxBaseLen < 1 {
+		return name[:maxUploadFilenameLen]
+	}
+	if len(base) > maxBaseLen {
+		base = base[:maxBaseLen]
+	}
+	return base + ext
+}
+
 func nameSetFromImages(images []domain.Image) map[string]bool {
 	names := make(map[string]bool, len(images))
 	for _, img := range images {

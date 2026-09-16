@@ -12,6 +12,7 @@ import (
 	"image-storage/apps/api/internal/health"
 	"image-storage/apps/api/internal/httpx"
 	authuc "image-storage/apps/api/internal/usecase/auth"
+	autotaguc "image-storage/apps/api/internal/usecase/autotag"
 	folderuc "image-storage/apps/api/internal/usecase/folder"
 	imageuc "image-storage/apps/api/internal/usecase/image"
 	shareuc "image-storage/apps/api/internal/usecase/share"
@@ -23,6 +24,7 @@ type Services struct {
 	Folders        *folderuc.Service
 	Images         *imageuc.Service
 	Tags           *taguc.Service
+	AutoTag        *autotaguc.Service
 	Shares         *shareuc.Service
 	JWT            *jwtauth.Service
 	EnableDevTools bool
@@ -39,8 +41,11 @@ func NewRouter(svc Services) http.Handler {
 
 	authH := &AuthHandler{Auth: svc.Auth}
 	folderH := &FolderHandler{Folders: svc.Folders}
-	imageH := &ImageHandler{Images: svc.Images, Folders: svc.Folders, EnableDevTools: svc.EnableDevTools}
+	imageH := &ImageHandler{
+		Images: svc.Images, Folders: svc.Folders, AutoTag: svc.AutoTag, EnableDevTools: svc.EnableDevTools,
+	}
 	tagH := &TagHandler{Tags: svc.Tags}
+	autoTagH := &AutoTagHandler{AutoTag: svc.AutoTag}
 	shareH := &ShareHandler{Shares: svc.Shares, Images: svc.Images}
 
 	r.Get("/api/health", health.Handler().ServeHTTP)
@@ -49,13 +54,16 @@ func NewRouter(svc Services) http.Handler {
 	r.Post("/api/auth/forgot-password", authH.ForgotPassword)
 	r.Post("/api/auth/reset-password", authH.ResetPassword)
 	r.Get("/api/public/images/{id}/file", shareH.PublicImage)
+	r.Get("/api/public/images/{id}/url", shareH.PublicImageURL)
 	r.Get("/api/share/{token}", shareH.ViewByToken)
 	r.Get("/api/share/{token}/images/{imageId}/file", shareH.ShareImageFile)
+	r.Get("/api/share/{token}/images/{imageId}/url", shareH.ShareImageURL)
 
 	r.Group(func(pr chi.Router) {
 		pr.Use(svc.JWT.Middleware)
 		pr.Get("/api/auth/me", authH.Me)
 		pr.Patch("/api/auth/me", authH.UpdateProfile)
+		pr.Patch("/api/auth/me/auto-tag", authH.UpdateAutoTagEnabled)
 		pr.Post("/api/auth/change-password", authH.ChangePassword)
 		pr.Delete("/api/auth/me", authH.DeleteAccount)
 		pr.Get("/api/folders", folderH.List)
@@ -69,15 +77,18 @@ func NewRouter(svc Services) http.Handler {
 		pr.Post("/api/images", imageH.Upload)
 		pr.Get("/api/images/{id}", imageH.Get)
 		pr.Get("/api/images/{id}/file", imageH.Download)
+		pr.Get("/api/images/{id}/url", imageH.ImageURL)
 		pr.Patch("/api/images/{id}", imageH.Update)
 		pr.Delete("/api/images/{id}", imageH.Delete)
 		pr.Post("/api/images/{id}/restore", imageH.Restore)
 		pr.Delete("/api/images/{id}/permanent", imageH.DeletePermanent)
+		pr.Delete("/api/trash", imageH.EmptyTrash)
 		if svc.EnableDevTools {
 			pr.Delete("/api/dev/images", imageH.DeleteAllPermanent)
 		}
 		pr.Put("/api/images/{id}/tags", tagH.SetImageTags)
 		pr.Get("/api/tags", tagH.List)
+		pr.Get("/api/autotag/status", autoTagH.Status)
 		pr.Get("/api/shares", shareH.List)
 		pr.Post("/api/shares", shareH.Create)
 		pr.Delete("/api/shares/{id}", shareH.Delete)

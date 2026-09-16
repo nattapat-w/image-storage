@@ -3,7 +3,10 @@ package dto
 import "image-storage/apps/api/internal/domain"
 
 func UserFromDomain(u domain.User) User {
-	return User{ID: u.ID, Email: u.Email, DisplayName: u.DisplayName, CreatedAt: u.CreatedAt}
+	return User{
+		ID: u.ID, Email: u.Email, DisplayName: u.DisplayName,
+		AutoTagEnabled: u.AutoTagEnabled, CreatedAt: u.CreatedAt,
+	}
 }
 
 func FolderFromDomain(f domain.Folder) Folder {

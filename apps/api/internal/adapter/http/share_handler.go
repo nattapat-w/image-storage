@@ -104,6 +104,37 @@ func (h *ShareHandler) PublicImage(w http.ResponseWriter, r *http.Request) {
 	h.serveShareFile(w, r, meta)
 }
 
+func (h *ShareHandler) PublicImageURL(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	meta, err := h.Shares.PublicImageFile(id)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	h.writeShareCDNURL(w, meta, "public", cdnTTLPublic, "/api/public/images/"+id+"/file", true)
+}
+
+func (h *ShareHandler) ShareImageURL(w http.ResponseWriter, r *http.Request) {
+	token := chi.URLParam(r, "token")
+	imageID := chi.URLParam(r, "imageId")
+	if err := h.Shares.CanAccessShareImage(token, imageID); err != nil {
+		WriteError(w, err)
+		return
+	}
+	meta, err := h.Images.FileMeta(imageID)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	h.writeShareCDNURL(w, meta, "private",
+		cdnTTLShare, "/api/share/"+token+"/images/"+imageID+"/file", true)
+}
+
+func (h *ShareHandler) writeShareCDNURL(w http.ResponseWriter, meta domain.ImageFile, mode string, ttlSec int, fallbackURL string, fallbackDirect bool) {
+	imageH := &ImageHandler{Images: h.Images}
+	imageH.writeCDNURL(w, meta, mode, ttlSec, fallbackURL, fallbackDirect)
+}
+
 func (h *ShareHandler) serveShareFile(w http.ResponseWriter, r *http.Request, meta domain.ImageFile) {
 	obj, err := h.Shares.OpenFile(meta)
 	if err != nil {

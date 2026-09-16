@@ -10,6 +10,21 @@ var (
 	ErrUnauthorized = errors.New("unauthorized")
 )
 
+type InputError struct {
+	Message string
+}
+
+func (e *InputError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return ErrInvalidInput.Error()
+}
+
+func (e *InputError) Is(target error) bool {
+	return target == ErrInvalidInput
+}
+
 type DuplicateImageError struct {
 	ExistingID string
 	SameFolder bool

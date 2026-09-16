@@ -25,10 +25,12 @@ func (r *UserRepo) Create(user domain.User, passwordHash, createdAt string) erro
 func (r *UserRepo) FindByEmail(email string) (domain.User, string, error) {
 	var u domain.User
 	var hash string
+	var autoTagEnabled int
 	err := r.store.DB.QueryRow(
-		`SELECT id, email, COALESCE(display_name, ''), password_hash, created_at FROM users WHERE email = ?`,
+		`SELECT id, email, COALESCE(display_name, ''), password_hash, COALESCE(auto_tag_enabled, 0), created_at FROM users WHERE email = ?`,
 		email,
-	).Scan(&u.ID, &u.Email, &u.DisplayName, &hash, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.DisplayName, &hash, &autoTagEnabled, &u.CreatedAt)
+	u.AutoTagEnabled = autoTagEnabled != 0
 	if err == sql.ErrNoRows {
 		return u, "", domain.ErrNotFound
 	}
@@ -37,10 +39,12 @@ func (r *UserRepo) FindByEmail(email string) (domain.User, string, error) {
 
 func (r *UserRepo) FindByID(id string) (domain.User, error) {
 	var u domain.User
+	var autoTagEnabled int
 	err := r.store.DB.QueryRow(
-		`SELECT id, email, COALESCE(display_name, ''), created_at FROM users WHERE id = ?`,
+		`SELECT id, email, COALESCE(display_name, ''), COALESCE(auto_tag_enabled, 0), created_at FROM users WHERE id = ?`,
 		id,
-	).Scan(&u.ID, &u.Email, &u.DisplayName, &u.CreatedAt)
+	).Scan(&u.ID, &u.Email, &u.DisplayName, &autoTagEnabled, &u.CreatedAt)
+	u.AutoTagEnabled = autoTagEnabled != 0
 	if err == sql.ErrNoRows {
 		return u, domain.ErrNotFound
 	}
@@ -55,6 +59,25 @@ func (r *UserRepo) UpdateProfile(id, email, displayName, updatedAt string) error
 	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
 		return domain.ErrConflict
 	}
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return domain.ErrNotFound
+	}
+	return nil
+}
+
+func (r *UserRepo) UpdateAutoTagEnabled(id string, enabled bool, updatedAt string) error {
+	val := 0
+	if enabled {
+		val = 1
+	}
+	res, err := r.store.DB.Exec(
+		`UPDATE users SET auto_tag_enabled = ?, updated_at = ? WHERE id = ?`,
+		val, updatedAt, id,
+	)
 	if err != nil {
 		return err
 	}

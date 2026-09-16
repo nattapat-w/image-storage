@@ -3,6 +3,7 @@ package httpadapter
 import (
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -12,6 +13,7 @@ import (
 	"image-storage/apps/api/internal/adapter/http/dto"
 	"image-storage/apps/api/internal/domain"
 	"image-storage/apps/api/internal/httpx"
+	autotaguc "image-storage/apps/api/internal/usecase/autotag"
 	folderuc "image-storage/apps/api/internal/usecase/folder"
 	imageuc "image-storage/apps/api/internal/usecase/image"
 )
@@ -19,6 +21,7 @@ import (
 type ImageHandler struct {
 	Images         *imageuc.Service
 	Folders        *folderuc.Service
+	AutoTag        *autotaguc.Service
 	EnableDevTools bool
 }
 
@@ -70,8 +73,12 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	mime := header.Header.Get("Content-Type")
 	img, err := h.Images.Upload(userID, r.FormValue("folderId"), header.Filename, mime, data)
 	if err != nil {
+		log.Printf("upload failed user=%s file=%q size=%d: %v", userID, header.Filename, len(data), err)
 		WriteError(w, err)
 		return
+	}
+	if h.AutoTag != nil {
+		h.AutoTag.AfterUpload(userID, img.ID, data)
 	}
 	httpx.WriteJSON(w, http.StatusCreated, dto.ImageFromDomain(img))
 }
@@ -94,6 +101,17 @@ func (h *ImageHandler) Download(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.serveFile(w, r, meta)
+}
+
+func (h *ImageHandler) ImageURL(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwtauth.UserIDFromContext(r.Context())
+	id := chi.URLParam(r, "id")
+	meta, err := h.Images.AccessFile(id, userID, true)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	h.writeCDNURL(w, meta, "private", cdnTTLPrivate, "/api/images/"+id+"/file", false)
 }
 
 func (h *ImageHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -149,6 +167,16 @@ func (h *ImageHandler) DeletePermanent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *ImageHandler) EmptyTrash(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwtauth.UserIDFromContext(r.Context())
+	count, err := h.Images.EmptyTrash(userID)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]int{"deleted": count})
+}
+
 func (h *ImageHandler) DeleteAllPermanent(w http.ResponseWriter, r *http.Request) {
 	if !h.EnableDevTools {
 		httpx.Error(w, http.StatusNotFound, "not found")
@@ -169,6 +197,24 @@ func (h *ImageHandler) DeleteAllPermanent(w http.ResponseWriter, r *http.Request
 		}
 	}
 	httpx.WriteJSON(w, http.StatusOK, map[string]int{"deleted": count, "foldersDeleted": folderCount})
+}
+
+func (h *ImageHandler) writeCDNURL(w http.ResponseWriter, meta domain.ImageFile, mode string, ttlSec int, fallbackURL string, fallbackDirect bool) {
+	if result, ok, err := h.Images.CDNURL(meta, mode, ttlSec); err != nil {
+		WriteError(w, err)
+		return
+	} else if ok {
+		httpx.WriteJSON(w, http.StatusOK, map[string]any{
+			"url":       result.URL,
+			"direct":    true,
+			"expiresIn": ttlSec,
+		})
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{
+		"url":    fallbackURL,
+		"direct": fallbackDirect,
+	})
 }
 
 func (h *ImageHandler) serveFile(w http.ResponseWriter, r *http.Request, meta domain.ImageFile) {

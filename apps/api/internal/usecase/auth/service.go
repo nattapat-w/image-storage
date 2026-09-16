@@ -58,6 +58,14 @@ func (s *Service) Me(userID string) (domain.User, error) {
 	return s.Users.FindByID(userID)
 }
 
+func (s *Service) UpdateAutoTagEnabled(userID string, enabled bool) (domain.User, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	if err := s.Users.UpdateAutoTagEnabled(userID, enabled, now); err != nil {
+		return domain.User{}, err
+	}
+	return s.Users.FindByID(userID)
+}
+
 func (s *Service) UpdateProfile(userID, email, displayName string) (domain.User, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	displayName = strings.TrimSpace(displayName)

@@ -106,6 +106,7 @@ func migrate(db *sql.DB) error {
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_images_deleted ON images(user_id, deleted_at)`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''`)
 	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN updated_at TEXT`)
+	_, _ = db.Exec(`ALTER TABLE users ADD COLUMN auto_tag_enabled INTEGER NOT NULL DEFAULT 0`)
 	_, _ = db.Exec(`
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
   id TEXT PRIMARY KEY,

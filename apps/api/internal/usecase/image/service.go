@@ -2,8 +2,8 @@ package imageuc
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +17,7 @@ type Service struct {
 	Images    port.ImageRepository
 	Folders   port.FolderRepository
 	Store     port.BlobStore
+	CDN port.ImageCDN
 	Meta      port.ImageMetadata
 	MaxUpload int64
 }
@@ -51,21 +52,26 @@ func (s *Service) Get(userID, id string) (domain.Image, error) {
 
 func (s *Service) Upload(userID string, folderID string, filename string, mime string, data []byte) (domain.Image, error) {
 	if int64(len(data)) > s.MaxUpload {
-		return domain.Image{}, domain.ErrInvalidInput
+		return domain.Image{}, &domain.InputError{
+			Message: fmt.Sprintf("file exceeds maximum upload size (%s)", formatUploadLimit(s.MaxUpload)),
+		}
 	}
+	mime = normalizeImageMIME(mime)
 	if mime == "" || !domain.AllowedMimes[mime] {
-		mime = http.DetectContentType(data)
+		mime = normalizeImageMIME(http.DetectContentType(data))
 	}
 	if !domain.AllowedMimes[mime] {
-		return domain.Image{}, domain.ErrInvalidInput
+		return domain.Image{}, &domain.InputError{
+			Message: fmt.Sprintf("unsupported image type (%s); use JPEG, PNG, GIF, or WebP", mime),
+		}
 	}
 	hash := s.Meta.Hash(data)
 	if folderID != "" && !s.Folders.Owns(userID, folderID) {
-		return domain.Image{}, domain.ErrForbidden
+		return domain.Image{}, &domain.InputError{Message: "folder not found"}
 	}
 	id := uuid.NewString()
-	safeName := filepath.Base(filename)
-	if safeName == "" || safeName == "." {
+	safeName := sanitizeUploadFilename(filename)
+	if safeName == "" {
 		safeName = id + extForMime(mime)
 	}
 	var folderPtr *string
@@ -79,7 +85,7 @@ func (s *Service) Upload(userID string, folderID string, filename string, mime s
 	safeName = uniqueImageName(safeName, nameSetFromImages(inFolder))
 	key := s.Store.Key(userID, id, safeName)
 	if err := s.Store.Save(key, bytes.NewReader(data)); err != nil {
-		return domain.Image{}, err
+		return domain.Image{}, fmt.Errorf("save file: %w", err)
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	img := domain.Image{
@@ -89,7 +95,7 @@ func (s *Service) Upload(userID string, folderID string, filename string, mime s
 	}
 	if err := s.Images.Insert(userID, img, key); err != nil {
 		_ = s.Store.Delete(key)
-		return domain.Image{}, err
+		return domain.Image{}, fmt.Errorf("save metadata: %w", err)
 	}
 	return s.Images.GetOwned(userID, id)
 }
@@ -147,6 +153,17 @@ func (s *Service) DeleteAllPermanent(userID string) (int, error) {
 	return len(keys), nil
 }
 
+func (s *Service) EmptyTrash(userID string) (int, error) {
+	keys, err := s.Images.PurgeTrash(userID)
+	if err != nil {
+		return 0, err
+	}
+	for _, key := range keys {
+		_ = s.Store.Delete(key)
+	}
+	return len(keys), nil
+}
+
 func (s *Service) FileMeta(id string) (domain.ImageFile, error) {
 	meta, err := s.Images.GetFileMeta(id)
 	if err != nil {
@@ -181,6 +198,24 @@ func (s *Service) OpenFile(meta domain.ImageFile) (port.BlobObject, error) {
 	return s.Store.Open(meta.StorageKey)
 }
 
+func (s *Service) CDNURL(meta domain.ImageFile, mode string, ttlSec int) (port.CDNURLResult, bool, error) {
+	if s.CDN == nil || !s.CDN.Enabled() {
+		return port.CDNURLResult{}, false, nil
+	}
+	if mode == "public" && s.CDN.UsePublicObjectURL() {
+		url, err := s.CDN.PublicObjectURL(meta.StorageKey)
+		if err != nil {
+			return port.CDNURLResult{}, false, err
+		}
+		return port.CDNURLResult{URL: url}, true, nil
+	}
+	url, err := s.CDN.SignedURL(meta.StorageKey, ttlSec)
+	if err != nil {
+		return port.CDNURLResult{}, false, err
+	}
+	return port.CDNURLResult{URL: url}, true, nil
+}
+
 func timelinePeriod(img domain.Image) string {
 	src := img.CreatedAt
 	if img.TakenAt != nil && *img.TakenAt != "" {
@@ -201,6 +236,29 @@ func timelineLabel(period string) string {
 		return period
 	}
 	return t.Format("January 2006")
+}
+
+func normalizeImageMIME(mime string) string {
+	switch strings.ToLower(strings.TrimSpace(mime)) {
+	case "image/jpg", "image/pjpeg", "image/x-citrix-jpeg":
+		return "image/jpeg"
+	default:
+		return mime
+	}
+}
+
+func formatUploadLimit(n int64) string {
+	const mb = 1 << 20
+	if n >= mb && n%mb == 0 {
+		return fmt.Sprintf("%d MB", n/mb)
+	}
+	if n >= mb {
+		return fmt.Sprintf("%.1f MB", float64(n)/float64(mb))
+	}
+	if n >= 1024 {
+		return fmt.Sprintf("%d KB", n/1024)
+	}
+	return fmt.Sprintf("%d bytes", n)
 }
 
 func extForMime(mime string) string {
