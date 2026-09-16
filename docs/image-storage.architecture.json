@@ -1,0 +1,179 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Image Storage Platform",
+    "output": "image-storage-architecture.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/nattapat-w/image-storage",
+      "provider": "github",
+      "revision": "41eb1c55a5b94d813d6759ece477b1d8f458a06c"
+    },
+    "views": [
+      {
+        "id": "request-path",
+        "label": "Primary request path",
+        "focus": ["users", "web", "api", "metadata", "blob"],
+        "note": "Follow uploads and dashboard requests from the browser through the API to durable storage."
+      },
+      {
+        "id": "auth-layer",
+        "label": "Authentication",
+        "focus": ["jwt", "api", "web"],
+        "note": "JWT middleware protects folders, images, and share management routes."
+      },
+      {
+        "id": "persistence",
+        "label": "Persistence split",
+        "focus": ["api", "metadata", "blob"],
+        "note": "Metadata stays in SQLite or Postgres; image bytes use pluggable object storage."
+      }
+    ],
+    "viewBox": [980, 560]
+  },
+  "components": [
+    {
+      "id": "users",
+      "type": "external",
+      "label": "Users",
+      "sublabel": "Browser",
+      "pos": [40, 230],
+      "size": [120, 60]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Next.js App",
+      "sublabel": "Dashboard · Auth · Share",
+      "brand": "next-js",
+      "tag": "Vercel",
+      "pos": [220, 230],
+      "size": [140, 64],
+      "sources": [
+        { "path": "apps/web/src/app/dashboard/page.tsx", "label": "Dashboard" },
+        { "path": "apps/web/src/app/share/[token]/page.tsx", "label": "Share page" }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "Go API",
+      "sublabel": "chi · clean architecture",
+      "brand": "render",
+      "tag": ":8080",
+      "pos": [440, 230],
+      "size": [140, 64],
+      "sources": [
+        { "path": "apps/api/internal/adapter/http/router.go", "label": "Router" },
+        { "path": "apps/api/cmd/server/main.go", "label": "Composition root" }
+      ]
+    },
+    {
+      "id": "jwt",
+      "type": "security",
+      "label": "JWT Auth",
+      "sublabel": "bcrypt · 7-day token",
+      "pos": [440, 80],
+      "size": [140, 60],
+      "sources": [
+        { "path": "apps/api/internal/adapter/auth/jwtauth/service.go", "label": "Token service" }
+      ]
+    },
+    {
+      "id": "metadata",
+      "type": "database",
+      "label": "Metadata Store",
+      "sublabel": "SQLite · Neon Postgres",
+      "pos": [680, 150],
+      "size": [140, 64],
+      "sources": [
+        { "path": "apps/api/internal/adapter/persistence/sqlite/db.go", "label": "Schema" },
+        { "path": "docs/infra.md", "line": 36, "label": "Database options" }
+      ]
+    },
+    {
+      "id": "blob",
+      "type": "cloud",
+      "label": "Object Storage",
+      "sublabel": "Neon · R2 · S3 · local",
+      "brand": "neon",
+      "pos": [680, 310],
+      "size": [140, 64],
+      "sources": [
+        { "path": "apps/api/internal/adapter/storage/factory.go", "label": "Storage factory" },
+        { "path": "docs/infra.md", "line": 5, "label": "Blob drivers" }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Vercel · Frontend",
+      "wraps": ["web"]
+    },
+    {
+      "kind": "region",
+      "label": "Render · Application",
+      "wraps": ["api", "jwt"]
+    },
+    {
+      "kind": "region",
+      "label": "Persistence",
+      "wraps": ["metadata", "blob"]
+    }
+  ],
+  "connections": [
+    {
+      "id": "users-to-web",
+      "from": "users",
+      "to": "web",
+      "label": "HTTPS",
+      "variant": "emphasis"
+    },
+    {
+      "id": "web-to-api",
+      "from": "web",
+      "to": "api",
+      "label": "REST /api/*"
+    },
+    {
+      "id": "jwt-to-api",
+      "from": "jwt",
+      "to": "api",
+      "label": "verify JWT",
+      "variant": "security",
+      "labelAt": [510, 154]
+    },
+    {
+      "id": "api-to-metadata",
+      "from": "api",
+      "to": "metadata",
+      "label": "SQL"
+    },
+    {
+      "id": "api-to-blob",
+      "from": "api",
+      "to": "blob",
+      "label": "S3 API / local disk"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Frontend",
+      "items": [
+        "Next.js dashboard for folders, uploads, and share pages",
+        "JWT stored client-side for authenticated API calls"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Backend & Storage",
+      "items": [
+        "Go API with clean architecture and JWT-protected routes",
+        "SQLite metadata plus pluggable Neon, R2, S3, or local blobs"
+      ]
+    }
+  ]
+}
