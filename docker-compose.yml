@@ -1,11 +1,14 @@
 # Local infrastructure for image-storage (optional — SQLite + local disk still work without this).
 #
-#   pnpm infra:up     start MinIO (+ Postgres for future use)
-#   pnpm dev:s3       dev with S3 blob storage via MinIO
+#   pnpm ollama:up      start Ollama only (auto-tag)
+#   pnpm ollama:setup   pull model + create phototagger (first run)
+#   pnpm infra:up       start Ollama + MinIO + Postgres
+#   pnpm dev:s3         dev with S3 blob storage via MinIO
 #
 services:
   minio:
-    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["s3"]
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     ports:
       - "9000:9000"
@@ -16,7 +19,8 @@ services:
     volumes:
       - minio_data:/data
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+    profiles: ["s3"]
+    image: helmforge/mc:1.0.0
     depends_on:
       minio:
         condition: service_started
@@ -28,6 +32,7 @@ services:
       "
 
   postgres:
+    profiles: ["postgres"]
     image: postgres:16-alpine
     ports:
       - "5432:5432"
@@ -43,6 +48,23 @@ services:
       timeout: 5s
       retries: 5
 
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    # Use 11435 on host — Ollama Desktop often owns 127.0.0.1:11434 on Windows.
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./apps/api/ollama:/modelfiles:ro
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
 volumes:
   minio_data:
   postgres_data:
+  ollama_data:

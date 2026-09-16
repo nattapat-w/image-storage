@@ -1,0 +1,14 @@
+# GPU override for Ollama (NVIDIA). Requires Docker Desktop + WSL2 GPU support.
+#
+#   pnpm ollama:gpu:up
+#
+# If this still runs on CPU, use Ollama Desktop instead (see apps/api/ollama/README.md).
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
