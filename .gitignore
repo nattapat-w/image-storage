@@ -1,0 +1,16 @@
+node_modules/
+.next/
+out/
+dist/
+bin/
+apps/api/.cache/
+apps/api/data/*
+!apps/api/data/.gitkeep
+*.exe
+.env
+.env.*
+!.env.example
+!.env.*.example
+coverage/
+*.log
+.DS_Store
