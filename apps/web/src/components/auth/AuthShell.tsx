@@ -11,7 +11,7 @@ export function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[var(--bg-tertiary)] p-6">
+    <main className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[var(--bg-tertiary)] p-4 sm:p-6">
       <div
         className="pointer-events-none absolute inset-0 opacity-30"
         style={{
@@ -20,7 +20,7 @@ export function AuthShell({
         }}
       />
       <div className="relative w-full max-w-[480px] overflow-hidden rounded-[4px] bg-[var(--bg-primary)] shadow-[0_8px_16px_rgba(0,0,0,0.24)]">
-        <div className="px-8 pt-8 pb-2 text-center">
+        <div className="px-4 pt-8 pb-2 text-center sm:px-8">
           <div className="discord-rail-icon discord-rail-icon-active mx-auto mb-4">
             <ImageIcon className="size-6" />
           </div>
@@ -32,7 +32,7 @@ export function AuthShell({
           </h1>
           <p className="mt-1 text-[16px] text-[var(--muted-foreground)]">{subtitle}</p>
         </div>
-        <div className="px-8 pb-8">{children}</div>
+        <div className="px-4 pb-8 sm:px-8">{children}</div>
       </div>
     </main>
   );

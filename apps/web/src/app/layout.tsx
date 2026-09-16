@@ -36,7 +36,6 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <AuthProvider>{children}</AuthProvider>
         <Toaster
           richColors
-          position="top-center"
           toastOptions={{
             classNames: {
               toast: "bg-[var(--bg-floating)] border-[var(--border)] text-[var(--foreground)]",
