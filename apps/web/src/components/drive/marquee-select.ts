@@ -11,3 +11,4 @@ export function clientRectFromPoints(x1: number, y1: number, x2: number, y2: num
 }
 
 export const DRIVE_IMAGE_SELECT_ATTR = "data-drive-image-id";
+export const DRIVE_FOLDER_SELECT_ATTR = "data-drive-folder-id";

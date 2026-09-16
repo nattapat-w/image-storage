@@ -20,6 +20,7 @@ type AuthContextValue = {
   logout: () => void;
   refreshUser: () => Promise<void>;
   updateProfile: (data: { email: string; displayName: string }) => Promise<void>;
+  updateAutoTagEnabled: (enabled: boolean) => Promise<void>;
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   deleteAccount: (password: string) => Promise<void>;
 };
@@ -83,6 +84,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(updated);
   }, []);
 
+  const updateAutoTagEnabled = useCallback(async (enabled: boolean) => {
+    const updated = await api.updateAutoTagEnabled(enabled);
+    setUser(updated);
+  }, []);
+
   const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
     await api.changePassword(currentPassword, newPassword);
   }, []);
@@ -106,6 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       refreshUser,
       updateProfile,
+      updateAutoTagEnabled,
       changePassword,
       deleteAccount,
     }),
@@ -117,6 +124,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       refreshUser,
       updateProfile,
+      updateAutoTagEnabled,
       changePassword,
       deleteAccount,
     ],

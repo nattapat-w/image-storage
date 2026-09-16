@@ -33,9 +33,15 @@ export async function fetchImageBlobUrl(src: string): Promise<string> {
   const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
 
   const promise = fetch(src, { headers })
-    .then((r) => {
+    .then(async (r) => {
       if (!r.ok) throw new Error("load failed");
-      return r.blob();
+      const buf = await r.arrayBuffer();
+      const headerType = r.headers.get("Content-Type")?.split(";")[0]?.trim();
+      const type =
+        headerType && headerType.startsWith("image/")
+          ? headerType
+          : sniffImageMime(buf) ?? "image/jpeg";
+      return new Blob([buf], { type });
     })
     .then((blob) => {
       evictOldest();
@@ -51,4 +57,15 @@ export async function fetchImageBlobUrl(src: string): Promise<string> {
 
   inflight.set(src, promise);
   return promise;
+}
+
+function sniffImageMime(buf: ArrayBuffer): string | undefined {
+  const b = new Uint8Array(buf.slice(0, 12));
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "image/jpeg";
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "image/png";
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return "image/gif";
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[8] === 0x57 && b[9] === 0x45) {
+    return "image/webp";
+  }
+  return undefined;
 }

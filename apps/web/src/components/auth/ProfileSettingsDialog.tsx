@@ -9,11 +9,17 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  UPLOAD_LIMIT_DEFAULT,
+  UPLOAD_LIMIT_WITH_AUTO_TAG,
+} from "@/components/drive/constants";
 import { cn } from "@/lib/utils";
 
 type Tab = "profile" | "password" | "account";
@@ -46,11 +52,13 @@ export function ProfileSettingsDialog({
   onOpenChange: (open: boolean) => void;
   initialTab?: Tab;
 }) {
-  const { user, updateProfile, changePassword, deleteAccount } = useAuth();
+  const { user, updateProfile, updateAutoTagEnabled, changePassword, deleteAccount } = useAuth();
   const [tab, setTab] = useState<Tab>(initialTab);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
+  const [autoTagEnabled, setAutoTagEnabled] = useState(false);
   const [profileBusy, setProfileBusy] = useState(false);
+  const [autoTagBusy, setAutoTagBusy] = useState(false);
   const [profileError, setProfileError] = useState("");
 
   const [currentPassword, setCurrentPassword] = useState("");
@@ -68,6 +76,7 @@ export function ProfileSettingsDialog({
       setTab(initialTab);
       setDisplayName(user?.displayName ?? "");
       setEmail(user?.email ?? "");
+      setAutoTagEnabled(user?.autoTagEnabled ?? false);
       setProfileError("");
       setPasswordError("");
       setCurrentPassword("");
@@ -76,6 +85,19 @@ export function ProfileSettingsDialog({
       setDeletePassword("");
     }
   }, [open, initialTab, user]);
+
+  async function onAutoTagToggle(checked: boolean) {
+    setAutoTagEnabled(checked);
+    setAutoTagBusy(true);
+    try {
+      await updateAutoTagEnabled(checked);
+    } catch (err) {
+      setAutoTagEnabled(!checked);
+      toast.error(err instanceof Error ? err.message : "Could not update setting");
+    } finally {
+      setAutoTagBusy(false);
+    }
+  }
 
   async function onSaveProfile(e: FormEvent) {
     e.preventDefault();
@@ -207,6 +229,30 @@ export function ProfileSettingsDialog({
                       className="h-10 rounded-[3px] border-0 bg-[var(--input)]"
                     />
                   </div>
+                  <div className="rounded-[8px] border border-[var(--border)] bg-[var(--bg-secondary)] p-4">
+                    <div className="flex items-start gap-3">
+                      <Checkbox
+                        id="profile-auto-tag"
+                        checked={autoTagEnabled}
+                        disabled={autoTagBusy}
+                        onCheckedChange={(checked) => void onAutoTagToggle(checked === true)}
+                        className="mt-0.5"
+                      />
+                      <div className="min-w-0 space-y-1">
+                        <Label
+                          htmlFor="profile-auto-tag"
+                          className="cursor-pointer text-[14px] font-medium text-[var(--header-primary)]"
+                        >
+                          AI auto-tagging on upload
+                        </Label>
+                        <p className="text-[13px] leading-relaxed text-[var(--muted-foreground)]">
+                          When enabled, uploaded images are tagged automatically. Uploads are
+                          limited to {UPLOAD_LIMIT_WITH_AUTO_TAG} images at a time. When disabled,
+                          you can upload up to {UPLOAD_LIMIT_DEFAULT} images at a time.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                   <Button
                     type="submit"
                     disabled={profileBusy}
@@ -315,8 +361,8 @@ export function ProfileSettingsDialog({
       </Dialog>
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <DialogContent className="w-[min(440px,calc(100vw-2rem))] max-w-none gap-0 border-[var(--border)] bg-[var(--bg-primary)] p-0 sm:max-w-none">
-          <DialogHeader className="px-4 pt-4 pb-2">
+        <DialogContent className="w-[min(440px,calc(100vw-2rem))] max-w-none gap-0 overflow-hidden border-[var(--border)] bg-[var(--bg-primary)] p-0 sm:max-w-none">
+          <DialogHeader className="px-5 pt-5 pb-4">
             <DialogTitle className="text-[20px] font-semibold text-[var(--header-primary)]">
               Delete account?
             </DialogTitle>
@@ -325,22 +371,23 @@ export function ProfileSettingsDialog({
             </p>
           </DialogHeader>
           <form
-            className="space-y-4 px-4 pb-4"
             onSubmit={(e) => {
               e.preventDefault();
               onDeleteAccount();
             }}
           >
-            <PasswordInput
-              label="Password"
-              id="delete-password"
-              value={deletePassword}
-              onChange={(e) => setDeletePassword(e.target.value)}
-              required
-              autoComplete="current-password"
-              className="h-10 rounded-[3px] border-0 bg-[var(--input)]"
-            />
-            <div className="flex justify-end gap-2">
+            <div className="space-y-4 px-5 pb-5">
+              <PasswordInput
+                label="Password"
+                id="delete-password"
+                value={deletePassword}
+                onChange={(e) => setDeletePassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                className="h-10 rounded-[3px] border-0 bg-[var(--input)]"
+              />
+            </div>
+            <DialogFooter className="gap-2 border-t border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4 sm:justify-end">
               <Button
                 type="button"
                 variant="secondary"
@@ -356,7 +403,7 @@ export function ProfileSettingsDialog({
               >
                 {deleteBusy ? "Deleting…" : "Delete forever"}
               </Button>
-            </div>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

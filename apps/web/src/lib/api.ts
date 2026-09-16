@@ -1,4 +1,5 @@
 import type {
+  AutoTagJob,
   Breadcrumb,
   Folder,
   FolderOption,
@@ -29,6 +30,12 @@ export class ApiError extends Error {
   ) {
     super(message);
   }
+}
+
+export function apiErrorMessage(err: unknown, fallback = "Something went wrong") {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
 }
 
 async function request<T>(
@@ -97,6 +104,13 @@ export const api = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+    });
+  },
+  updateAutoTagEnabled(enabled: boolean) {
+    return request<User>("/api/auth/me/auto-tag", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
     });
   },
   changePassword(currentPassword: string, newPassword: string) {
@@ -178,6 +192,14 @@ export const api = {
       body: JSON.stringify({ tags }),
     });
   },
+  getImage(id: string) {
+    return request<ImageItem>(`/api/images/${id}`);
+  },
+  getAutoTagStatus(ids?: string[]) {
+    const query =
+      ids?.length ? `?ids=${encodeURIComponent(ids.join(","))}` : "";
+    return request<{ jobs: AutoTagJob[] }>(`/api/autotag/status${query}`);
+  },
   uploadImage(file: File, folderId?: string) {
     const form = new FormData();
     form.append("file", file);
@@ -208,6 +230,9 @@ export const api = {
   deleteImagePermanent(id: string) {
     return request<void>(`/api/images/${id}/permanent`, { method: "DELETE" });
   },
+  emptyTrash() {
+    return request<{ deleted: number }>("/api/trash", { method: "DELETE" });
+  },
   deleteAllImages() {
     return request<{ deleted: number; foldersDeleted: number }>("/api/dev/images", {
       method: "DELETE",
@@ -217,8 +242,18 @@ export const api = {
     if (token) return `/api/share/${token}/images/${id}/file`;
     return `/api/images/${id}/file`;
   },
+  imageCdnUrl(id: string, token?: string) {
+    if (token) return `/api/share/${token}/images/${id}/url`;
+    return `/api/images/${id}/url`;
+  },
   publicImageUrl(id: string) {
     return `/api/public/images/${id}/file`;
+  },
+  publicImageCdnUrl(id: string) {
+    return `/api/public/images/${id}/url`;
+  },
+  imageViewPath(id: string) {
+    return `/image/${id}`;
   },
   createShare(resourceType: "image" | "folder", resourceId: string) {
     return request<Share>("/api/shares", {

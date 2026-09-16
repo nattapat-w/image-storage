@@ -11,6 +11,8 @@ import {
   ImageIcon,
   LayoutGrid,
   List,
+  Loader2,
+  Menu,
   MoreHorizontal,
   Rows3,
   Search,
@@ -51,25 +53,45 @@ import {
 } from "@/components/drive/DriveContentViews";
 import {
   DRAG_TYPE,
+  DRIVE_OPEN_SURFACE,
+  DRIVE_SELECT_SURFACE,
   FOLDER_DRAG_TYPE,
   type Sort,
   type ViewMode,
+  uploadLimitForUser,
+  VIEW_OPTIONS,
 } from "@/components/drive/constants";
 import { dragIncludesImages, readImageDragIds } from "@/components/drive/image-drag";
 import { isDriveKeyboardTarget } from "@/components/drive/image-keyboard";
 import { ImageMarqueeSurface } from "@/components/drive/ImageMarqueeSurface";
 import { useImageMultiSelect } from "@/components/drive/useImageMultiSelect";
-import { folderOptionToFolderType, folderStatsLabel } from "@/components/drive/drive-format";
+import { useFolderMultiSelect } from "@/components/drive/useFolderMultiSelect";
+import {
+  buildBreadcrumbFromAllFolders,
+  folderOptionToFolderType,
+  folderStatsLabel,
+  insertImageIntoTimelineGroups,
+  insertImageSorted,
+} from "@/components/drive/drive-format";
 import {
   parentIdFromSidebarHint,
   sidebarHintFromEvent,
   type SidebarDropHint,
 } from "@/components/drive/sidebar-drop";
 import { SIDEBAR_INDENT_PX } from "@/lib/folder-tree";
-import { api, ApiError, formatBytes } from "@/lib/api";
+import {
+  addPendingAutoTagIds,
+  clearPendingAutoTagIds,
+  liveAutoTagElapsed,
+  loadPendingAutoTagIds,
+  removePendingAutoTagId,
+  watchAutoTagJobs,
+} from "@/lib/auto-tag-poll";
+import { api, ApiError, apiErrorMessage, formatBytes } from "@/lib/api";
 import { prefetchImageBlob } from "@/lib/image-blob-cache";
 import { displayImageName, joinImageName, splitImageName } from "@/lib/image-name";
 import type {
+  AutoTagJob,
   Breadcrumb,
   BrowseMode,
   Folder as FolderType,
@@ -123,7 +145,18 @@ type RenameTarget = {
   mimeType?: string;
 };
 
+type FolderListingCache = {
+  folders: FolderType[];
+  images: ImageItem[];
+  crumbs: Breadcrumb[];
+};
+
+function folderListingCacheKey(folderId: string | undefined, sort: Sort) {
+  return `${folderId ?? ""}|${sort}`;
+}
+
 export function DriveBrowser() {
+  const { user } = useAuth();
   const [folderId, setFolderId] = useState<string | undefined>();
   const [folders, setFolders] = useState<FolderType[]>([]);
   const [images, setImages] = useState<ImageItem[]>([]);
@@ -150,71 +183,300 @@ export function DriveBrowser() {
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [tagFilter, setTagFilter] = useState<string | undefined>();
   const [previewTags, setPreviewTags] = useState<string[]>([]);
+  const [taggingImageIds, setTaggingImageIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [autoTagJobs, setAutoTagJobs] = useState<Map<string, AutoTagJob>>(() => new Map());
+  const [elapsedTick, setElapsedTick] = useState(0);
+  const [contentLoading, setContentLoading] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const sidebarRef = useRef<HTMLDivElement>(null);
+  const listingCacheRef = useRef(new Map<string, FolderListingCache>());
+  const autoTagWatchRef = useRef(new Set<string>());
 
-  const refresh = useCallback(
+  const loadMeta = useCallback(async () => {
+    const [all, tags] = await Promise.all([api.listAllFolders(), api.listTags()]);
+    setAllFolders(all);
+    setAllTags(tags);
+  }, []);
+
+  const isImageTagging = useCallback(
+    (id: string) => {
+      const job = autoTagJobs.get(id);
+      if (job?.state === "running") return true;
+      return taggingImageIds.has(id) && job?.state !== "failed";
+    },
+    [autoTagJobs, taggingImageIds],
+  );
+
+  const getTaggingElapsed = useCallback(
+    (id: string) => liveAutoTagElapsed(autoTagJobs.get(id)),
+    [autoTagJobs, elapsedTick],
+  );
+
+  useEffect(() => {
+    const running = [...autoTagJobs.values()].some((job) => job.state === "running");
+    if (!running) return;
+    const timer = setInterval(() => setElapsedTick((value) => value + 1), 1000);
+    return () => clearInterval(timer);
+  }, [autoTagJobs]);
+
+  const patchTaggedImage = useCallback((img: ImageItem) => {
+    setImages((prev) => prev.map((item) => (item.id === img.id ? img : item)));
+    setTimelineGroups((prev) =>
+      prev.map((group) => ({
+        ...group,
+        images: group.images.map((item) => (item.id === img.id ? img : item)),
+      })),
+    );
+    setSelected((current) => {
+      if (current?.id !== img.id) return current;
+      setPreviewTags([...img.tags]);
+      return img;
+    });
+  }, []);
+
+  const startAutoTagWatch = useCallback(
+    (imageIds: string[], { notify = true }: { notify?: boolean } = {}) => {
+      const pending = imageIds.filter((id) => !autoTagWatchRef.current.has(id));
+      if (!pending.length) return;
+
+      for (const id of pending) autoTagWatchRef.current.add(id);
+      addPendingAutoTagIds(pending);
+      setTaggingImageIds((prev) => new Set([...prev, ...pending]));
+      if (notify) {
+        toast.info("AI is tagging your upload…", { id: "auto-tag", duration: Infinity });
+      }
+
+      const clearTagging = (id: string) => {
+        autoTagWatchRef.current.delete(id);
+        removePendingAutoTagId(id);
+        setTaggingImageIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      };
+
+      void watchAutoTagJobs(
+        pending,
+        async (ids) => (await api.getAutoTagStatus(ids)).jobs,
+        api.getImage,
+        {
+          onStatus: (jobs) => {
+            setAutoTagJobs((prev) => {
+              const next = new Map(prev);
+              for (const job of jobs) next.set(job.imageId, job);
+              return next;
+            });
+          },
+          onTagged: (img) => {
+            patchTaggedImage(img);
+            clearTagging(img.id);
+            void loadMeta();
+          },
+          onFailed: (job) => {
+            clearTagging(job.imageId);
+            toast.error(`AI tagging failed${job.error ? `: ${job.error}` : ""}`, {
+              description: "Try uploading again or check Ollama logs.",
+            });
+          },
+        },
+        { intervalMs: 2000, timeoutMs: 180_000 },
+      ).then(({ tagged, failed, timedOut }) => {
+        if (tagged > 0 && failed === 0 && timedOut === 0) {
+          toast.success(`AI tagged ${tagged} image${tagged === 1 ? "" : "s"}`, {
+            id: "auto-tag",
+          });
+          return;
+        }
+        if (tagged > 0 && (failed > 0 || timedOut > 0)) {
+          toast.warning(`AI tagged ${tagged} image${tagged === 1 ? "" : "s"}; some jobs did not finish`, {
+            id: "auto-tag",
+          });
+          return;
+        }
+        if (failed > 0) {
+          toast.error("AI tagging failed", { id: "auto-tag" });
+          return;
+        }
+        if (timedOut > 0) {
+          toast.warning("AI tagging timed out. Check API logs or try GPU mode (`pnpm ollama:gpu:up`).", {
+            id: "auto-tag",
+          });
+          return;
+        }
+        toast.dismiss("auto-tag");
+      });
+    },
+    [loadMeta, patchTaggedImage],
+  );
+
+  useEffect(() => {
+    if (user?.autoTagEnabled) return;
+    clearPendingAutoTagIds();
+    autoTagWatchRef.current.clear();
+    setTaggingImageIds(new Set());
+    setAutoTagJobs(new Map());
+    toast.dismiss("auto-tag");
+  }, [user?.autoTagEnabled]);
+
+  useEffect(() => {
+    if (!user?.autoTagEnabled) return;
+    const resumeIds = loadPendingAutoTagIds().filter((id) => !autoTagWatchRef.current.has(id));
+    if (!resumeIds.length) return;
+    startAutoTagWatch(resumeIds, { notify: false });
+  }, [user?.autoTagEnabled, startAutoTagWatch]);
+
+  const loadContents = useCallback(
     async (folderIdOverride?: string | undefined) => {
-      const allP = api.listAllFolders();
-      const tagsP = api.listTags();
-
       if (browseMode === "timeline") {
-        const [groups, all, tags] = await Promise.all([api.listTimeline(), allP, tagsP]);
-        setTimelineGroups(groups);
-        setFolders([]);
-        setImages([]);
-        setCrumbs([]);
-        setAllFolders(all);
-        setAllTags(tags);
+        setContentLoading(true);
+        try {
+          const groups = await api.listTimeline();
+          setTimelineGroups(groups);
+          setFolders([]);
+          setImages([]);
+          setCrumbs([]);
+        } finally {
+          setContentLoading(false);
+        }
         return;
       }
 
       let activeFolderId =
         folderIdOverride !== undefined ? folderIdOverride : folderId;
 
-      let crumbs: Breadcrumb[] = [];
-      if (browseMode === "folder") {
-        try {
-          crumbs = await api.breadcrumb(activeFolderId);
-        } catch (e) {
-          if (e instanceof ApiError && e.status === 404) {
-            activeFolderId = undefined;
-            setFolderId(undefined);
-            crumbs = [];
-          } else {
-            throw e;
-          }
+      const cacheKey =
+        browseMode === "folder" && !tagFilter
+          ? folderListingCacheKey(activeFolderId, sort)
+          : null;
+      if (cacheKey) {
+        if (!listingCacheRef.current.has(cacheKey)) {
+          setContentLoading(true);
         }
+      } else {
+        setContentLoading(true);
       }
 
-      const listOpts =
-        browseMode === "favorites"
-          ? { favorite: true, sort }
-          : browseMode === "trash"
-            ? { trash: true, sort }
-            : tagFilter
-              ? { tag: tagFilter, sort }
-              : { folderId: activeFolderId, sort };
+      try {
+        const listOpts =
+          browseMode === "favorites"
+            ? { favorite: true, sort }
+            : browseMode === "trash"
+              ? { trash: true, sort }
+              : tagFilter
+                ? { tag: tagFilter, sort }
+                : { folderId: activeFolderId, sort };
 
-      const [f, i, all, tags] = await Promise.all([
-        browseMode === "folder" ? api.listFolders(activeFolderId) : Promise.resolve([] as FolderType[]),
-        api.listImages(listOpts),
-        allP,
-        tagsP,
-      ]);
-      setTimelineGroups([]);
-      setFolders(f);
-      setImages(i);
-      setCrumbs(crumbs);
-      setAllFolders(all);
-      setAllTags(tags);
+        const breadcrumbP =
+          browseMode === "folder"
+            ? api.breadcrumb(activeFolderId).catch((e) => {
+                if (e instanceof ApiError && e.status === 404) {
+                  activeFolderId = undefined;
+                  setFolderId(undefined);
+                  return [] as Breadcrumb[];
+                }
+                throw e;
+              })
+            : Promise.resolve([] as Breadcrumb[]);
+
+        const [crumbsResult, f, i] = await Promise.all([
+          breadcrumbP,
+          browseMode === "folder"
+            ? api.listFolders(activeFolderId)
+            : Promise.resolve([] as FolderType[]),
+          api.listImages(listOpts),
+        ]);
+
+        setTimelineGroups([]);
+        setFolders(f);
+        setImages(i);
+        setCrumbs(crumbsResult);
+
+        if (cacheKey) {
+          listingCacheRef.current.set(cacheKey, {
+            folders: f,
+            images: i,
+            crumbs: crumbsResult,
+          });
+        }
+      } finally {
+        setContentLoading(false);
+      }
     },
     [folderId, sort, browseMode, tagFilter],
   );
 
+  const reloadAll = useCallback(
+    async (folderIdOverride?: string | undefined) => {
+      listingCacheRef.current.clear();
+      await Promise.all([loadMeta(), loadContents(folderIdOverride)]);
+    },
+    [loadMeta, loadContents],
+  );
+
+  const prefetchFolderListing = useCallback(
+    (id: string) => {
+      if (browseMode !== "folder" || tagFilter) return;
+      const key = folderListingCacheKey(id, sort);
+      if (listingCacheRef.current.has(key)) return;
+      Promise.all([
+        api.listFolders(id),
+        api.listImages({ folderId: id, sort }),
+        api.breadcrumb(id),
+      ])
+        .then(([folders, images, crumbs]) => {
+          listingCacheRef.current.set(key, { folders, images, crumbs });
+        })
+        .catch(() => {});
+    },
+    [sort, browseMode, tagFilter],
+  );
+
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
+
+  const navigateToFolder = useCallback(
+    (id: string | undefined) => {
+      setBrowseMode("folder");
+      setTagFilter(undefined);
+
+      const optimisticCrumbs = buildBreadcrumbFromAllFolders(id, allFolders);
+      setCrumbs(optimisticCrumbs);
+
+      const cached = listingCacheRef.current.get(folderListingCacheKey(id, sort));
+      if (cached) {
+        setFolders(cached.folders);
+        setImages(cached.images);
+        if (cached.crumbs.length) setCrumbs(cached.crumbs);
+        setContentLoading(false);
+      } else {
+        setFolders([]);
+        setImages([]);
+        setContentLoading(true);
+      }
+
+      setFolderId(id);
+      closeSidebar();
+    },
+    [allFolders, sort, closeSidebar],
+  );
+
   useEffect(() => {
-    refresh().catch(() => toast.error("Failed to load files"));
-  }, [refresh]);
+    if (!sidebarOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeSidebar();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [sidebarOpen, closeSidebar]);
+
+  useEffect(() => {
+    loadMeta().catch(() => toast.error("Failed to load folders"));
+  }, [loadMeta]);
+
+  useEffect(() => {
+    loadContents().catch(() => toast.error("Failed to load files"));
+  }, [loadContents]);
 
   const filteredFolders = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -234,22 +496,53 @@ export function DriveBrowser() {
 
   const {
     selectedIds: selectedImageIds,
-    selectedCount,
+    selectedCount: selectedImageCount,
     isSelected: isImageSelected,
     handleSelectClick: onImageSelectClick,
     selectAll,
-    clearSelection,
+    clearSelection: clearImageSelection,
     idsForBulkAction,
     applyMarqueeSelection,
   } = useImageMultiSelect(filteredImages);
+
+  const {
+    isSelected: isFolderSelected,
+    handleSelectClick: onFolderSelectClick,
+    clearSelection: clearFolderSelection,
+    selectedCount: selectedFolderCount,
+  } = useFolderMultiSelect(filteredFolders);
+
+  const handleFolderSelectClick = useCallback(
+    (e: React.MouseEvent, folder: FolderType) => {
+      clearImageSelection();
+      onFolderSelectClick(e, folder);
+    },
+    [clearImageSelection, onFolderSelectClick],
+  );
+
+  const handleImageSelectClick = useCallback(
+    (e: React.MouseEvent, img: ImageItem) => {
+      clearFolderSelection();
+      onImageSelectClick(e, img);
+    },
+    [clearFolderSelection, onImageSelectClick],
+  );
+
+  const clearAllSelection = useCallback(() => {
+    clearImageSelection();
+    clearFolderSelection();
+  }, [clearImageSelection, clearFolderSelection]);
+
+  const selectedCount = selectedImageCount;
 
   const openPreview = useCallback((img: ImageItem) => {
     setSelected(img);
   }, []);
 
   useEffect(() => {
-    clearSelection();
-  }, [folderId, browseMode, tagFilter, clearSelection]);
+    clearImageSelection();
+    clearFolderSelection();
+  }, [folderId, browseMode, tagFilter, clearImageSelection, clearFolderSelection]);
 
   const previewImageIndex = useMemo(() => {
     if (!selected) return -1;
@@ -330,24 +623,68 @@ export function DriveBrowser() {
   async function createFolder(name: string) {
     await api.createFolder(name, folderId);
     toast.success("Folder created");
-    await refresh();
+    await reloadAll();
   }
 
   async function onUpload(files: FileList | null) {
     if (!files?.length) return;
-    const t = toast.loading("Uploadingโ€ฆ");
-    let uploaded = 0;
+    const limit = uploadLimitForUser(user?.autoTagEnabled);
+    const picked = Array.from(files);
+    if (picked.length > limit) {
+      toast.error(
+        user?.autoTagEnabled
+          ? `Auto-tagging is on — select at most ${limit} images to upload.`
+          : `Select at most ${limit} images to upload.`,
+      );
+      if (fileRef.current) fileRef.current.value = "";
+      return;
+    }
+    const batch = picked;
+    const total = batch.length;
+    const uploadToastMessage = (current: number) =>
+      total === 1 ? "Uploading 1 file…" : `Uploading ${current} of ${total} files…`;
+    const t = toast.loading(uploadToastMessage(1));
+    const uploadedIds: string[] = [];
     try {
-      for (const file of Array.from(files)) {
-        await api.uploadImage(file, browseMode === "folder" ? folderId : undefined);
-        uploaded++;
+      for (let i = 0; i < batch.length; i++) {
+        const file = batch[i];
+        toast.loading(uploadToastMessage(i + 1), { id: t });
+        try {
+          const img = await api.uploadImage(
+            file,
+            browseMode === "folder" ? folderId : undefined,
+          );
+          uploadedIds.push(img.id);
+          addUploadedImageToState(img);
+        } catch (err) {
+          const reason = apiErrorMessage(err, "Upload failed");
+          if (uploadedIds.length > 0) {
+            toast.warning(`Uploaded ${uploadedIds.length} of ${total}, then failed`, {
+              id: t,
+              description: `${file.name}: ${reason}`,
+            });
+            void loadMeta();
+            if (user?.autoTagEnabled) {
+              startAutoTagWatch(uploadedIds);
+            }
+          } else {
+            toast.error(`Upload failed: ${file.name}`, {
+              id: t,
+              description: reason,
+            });
+          }
+          return;
+        }
       }
-      if (uploaded > 0) {
-        toast.success(`Uploaded ${uploaded} file(s)`, { id: t });
+      if (uploadedIds.length > 0) {
+        toast.success(`Uploaded ${uploadedIds.length} file(s)`, { id: t });
+        void loadMeta();
       }
-      await refresh();
-    } catch {
-      toast.error("Upload failed", { id: t });
+      if (user?.autoTagEnabled) {
+        startAutoTagWatch(uploadedIds);
+      }
+    } finally {
+      if (fileRef.current) fileRef.current.value = "";
     }
   }
 
@@ -369,8 +706,8 @@ export function DriveBrowser() {
 
     if (moved === 0) return;
     toast.success(moved === 1 ? "Moved" : `Moved ${moved} items`);
-    clearSelection();
-    await refresh();
+    clearImageSelection();
+    await reloadAll();
   }
 
   function openMoveDialog(contextImg?: ImageItem) {
@@ -395,9 +732,9 @@ export function DriveBrowser() {
             await api.deleteImagePermanent(id);
             if (selected?.id === id) setSelected(null);
           }
-          clearSelection();
+          clearImageSelection();
           toast.success("Permanently deleted");
-          await refresh();
+          await reloadAll();
         },
       });
       return;
@@ -413,9 +750,9 @@ export function DriveBrowser() {
           await api.deleteImage(id);
           if (selected?.id === id) setSelected(null);
         }
-        clearSelection();
+        clearImageSelection();
         toast.success(ids.length === 1 ? "Moved to trash" : `Moved ${ids.length} items to trash`);
-        await refresh();
+        await reloadAll();
       },
     });
   }
@@ -428,26 +765,26 @@ export function DriveBrowser() {
         selectAll();
         return;
       }
-      if (e.key === "Escape" && selectedCount > 0) {
+      if (e.key === "Escape" && (selectedImageCount > 0 || selectedFolderCount > 0)) {
         e.preventDefault();
-        clearSelection();
+        clearAllSelection();
         return;
       }
-      if (e.key === "Delete" && selectedCount > 0) {
+      if (e.key === "Delete" && selectedImageCount > 0) {
         e.preventDefault();
         askBulkTrash();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectAll, clearSelection, selectedCount, browseMode, selected, idsForBulkAction]);
+  }, [selectAll, clearAllSelection, selectedImageCount, selectedFolderCount, browseMode, selected, idsForBulkAction]);
 
   async function moveFolderToParent(folderToMove: string, targetParentId: string | null) {
     await api.updateFolder(folderToMove, {
       parentId: targetParentId === null ? null : targetParentId,
     });
     toast.success("Folder moved");
-    await refresh();
+    await reloadAll();
   }
 
   function readDraggedFolderId(e: React.DragEvent): string | null {
@@ -546,7 +883,7 @@ export function DriveBrowser() {
           await api.deleteImagePermanent(id);
           if (selected?.id === id) setSelected(null);
           toast.success("Permanently deleted");
-          await refresh();
+          await reloadAll();
         },
       });
       return;
@@ -560,7 +897,27 @@ export function DriveBrowser() {
         await api.deleteImage(id);
         if (selected?.id === id) setSelected(null);
         toast.success("Moved to trash");
-        await refresh();
+        await reloadAll();
+      },
+    });
+  }
+
+  function askEmptyTrash() {
+    setConfirm({
+      title: "Delete all items in trash?",
+      message: `${images.length} item(s) will be permanently removed. This cannot be undone.`,
+      confirmLabel: "Delete all",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const { deleted } = await api.emptyTrash();
+          setSelected(null);
+          clearImageSelection();
+          toast.success(deleted === 0 ? "Trash is already empty" : `Permanently deleted ${deleted} item(s)`);
+          await reloadAll();
+        } catch {
+          toast.error("Failed to empty trash");
+        }
       },
     });
   }
@@ -584,7 +941,7 @@ export function DriveBrowser() {
               `Deleted ${deleted} image(s) and ${foldersDeleted} folder(s)`,
             );
           }
-          await refresh();
+          await reloadAll();
         } catch {
           toast.error("Failed to delete everything");
         }
@@ -595,14 +952,102 @@ export function DriveBrowser() {
   async function restoreImage(id: string) {
     await api.restoreImage(id);
     toast.success("Restored");
-    await refresh();
+    await reloadAll();
+  }
+
+  const addUploadedImageToState = useCallback(
+    (img: ImageItem) => {
+      const inFolder = (img.folderId ?? null) === (folderId ?? null);
+      const matchesTag = tagFilter ? img.tags.includes(tagFilter) : true;
+
+      if (browseMode === "timeline") {
+        setTimelineGroups((prev) => insertImageIntoTimelineGroups(prev, img));
+        void prefetchImageBlob(img.id);
+        return;
+      }
+
+      if (browseMode === "favorites" || browseMode === "trash") return;
+      if (browseMode === "folder" && tagFilter && !matchesTag) return;
+      if (browseMode === "folder" && !tagFilter && !inFolder) return;
+
+      setImages((prev) => insertImageSorted(prev, img, sort));
+
+      if (browseMode === "folder" && !tagFilter) {
+        const key = folderListingCacheKey(folderId, sort);
+        const cached = listingCacheRef.current.get(key);
+        if (cached) {
+          listingCacheRef.current.set(key, {
+            ...cached,
+            images: insertImageSorted(cached.images, img, sort),
+          });
+        }
+      }
+
+      void prefetchImageBlob(img.id);
+    },
+    [browseMode, folderId, tagFilter, sort],
+  );
+
+  function patchImageInState(updated: ImageItem) {
+    if (browseMode === "timeline") {
+      setTimelineGroups((groups) =>
+        groups.map((g) => ({
+          ...g,
+          images: g.images.map((i) => (i.id === updated.id ? updated : i)),
+        })),
+      );
+      return;
+    }
+
+    if (browseMode === "favorites") {
+      setImages((prev) => {
+        if (!updated.favorite) {
+          return prev.filter((i) => i.id !== updated.id);
+        }
+        if (prev.some((i) => i.id === updated.id)) {
+          return prev.map((i) => (i.id === updated.id ? updated : i));
+        }
+        return [...prev, updated];
+      });
+      return;
+    }
+
+    setImages((prev) =>
+      prev.map((i) => (i.id === updated.id ? updated : i)),
+    );
+
+    if (browseMode === "folder" && !tagFilter) {
+      const key = folderListingCacheKey(folderId, sort);
+      const cached = listingCacheRef.current.get(key);
+      if (cached) {
+        listingCacheRef.current.set(key, {
+          ...cached,
+          images: cached.images.map((i) =>
+            i.id === updated.id ? updated : i,
+          ),
+        });
+      }
+    }
   }
 
   async function toggleFavorite(img: ImageItem) {
-    const updated = await api.updateImage(img.id, { favorite: !img.favorite });
-    if (selected?.id === img.id) setSelected(updated);
-    await refresh();
-    toast.success(updated.favorite ? "Added to favorites" : "Removed from favorites");
+    const nextFavorite = !img.favorite;
+    const optimistic = { ...img, favorite: nextFavorite };
+    patchImageInState(optimistic);
+    if (selected?.id === img.id) setSelected(optimistic);
+
+    try {
+      const updated = await api.updateImage(img.id, { favorite: nextFavorite });
+      patchImageInState(updated);
+      if (selected?.id === img.id) setSelected(updated);
+      toast.success(
+        updated.favorite ? "Added to favorites" : "Removed from favorites",
+      );
+    } catch {
+      patchImageInState(img);
+      if (selected?.id === img.id) setSelected(img);
+      toast.error("Failed to update favorite");
+    }
   }
 
   function askDeleteFolder(id: string, name: string) {
@@ -616,7 +1061,7 @@ export function DriveBrowser() {
         await api.deleteFolder(id);
         if (folderId === id) setFolderId(undefined);
         toast.success("Folder deleted");
-        await refresh(nextFolderId);
+        await reloadAll(nextFolderId);
       },
     });
   }
@@ -625,7 +1070,7 @@ export function DriveBrowser() {
     const v = img.visibility === "public" ? "private" : "public";
     await api.updateImage(img.id, { visibility: v });
     toast.success(v === "public" ? "Now public" : "Now private");
-    await refresh();
+    await reloadAll();
     if (selected?.id === img.id) setSelected({ ...img, visibility: v });
   }
 
@@ -648,7 +1093,7 @@ export function DriveBrowser() {
       }
     }
     toast.success("Renamed");
-    await refresh();
+    await reloadAll();
   }
 
   async function savePreviewChanges() {
@@ -679,7 +1124,7 @@ export function DriveBrowser() {
       setPreviewName(splitImageName(img.name, img.mimeType).baseName);
       setPreviewTags([...savedTags]);
       toast.success("Changes saved");
-      await refresh();
+      await reloadAll();
     } catch {
       toast.error("Failed to save changes");
     } finally {
@@ -825,12 +1270,6 @@ export function DriveBrowser() {
       ? timelineGroups.reduce((n, g) => n + g.images.length, 0)
       : images.length;
 
-  function navigateToFolder(id: string | undefined) {
-    setBrowseMode("folder");
-    setFolderId(id);
-    setTagFilter(undefined);
-  }
-
   const sortLabel =
     sort === "name" ? "Name" : sort === "date" ? "Last modified" : "File size";
 
@@ -844,11 +1283,12 @@ export function DriveBrowser() {
           : FolderOpen;
 
   const empty =
-    browseMode === "timeline"
+    !contentLoading &&
+    (browseMode === "timeline"
       ? false
       : browseMode === "folder"
         ? !filteredFolders.length && !filteredImages.length
-        : !filteredImages.length;
+        : !filteredImages.length);
 
   function emptyCopy() {
     if (query.trim()) {
@@ -878,14 +1318,14 @@ export function DriveBrowser() {
   }
 
   const allowUpload = browseMode !== "trash" && browseMode !== "favorites";
+  const uploadLimit = uploadLimitForUser(user?.autoTagEnabled);
 
   const showFavoriteStar = browseMode !== "trash";
-  const { user } = useAuth();
   const imageOwnerLabel = userDisplayName(user);
 
   return (
     <div
-      className="flex h-screen overflow-hidden bg-[var(--bg-primary)]"
+      className="flex h-dvh overflow-hidden bg-[var(--bg-primary)]"
       onDragEnter={(e) => {
         if (!allowUpload || isInternalDrag(e)) return;
         if (e.dataTransfer.types.includes("Files")) setFileDragDepth((d) => d + 1);
@@ -910,8 +1350,17 @@ export function DriveBrowser() {
         }
       }}
     >
+      {sidebarOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation"
+          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          onClick={closeSidebar}
+        />
+      ) : null}
+
       {/* Server rail */}
-      <div className="hidden w-[72px] shrink-0 flex-col items-center gap-2 bg-[var(--bg-tertiary)] py-3 sm:flex">
+      <div className="hidden w-[72px] shrink-0 flex-col items-center gap-2 bg-[var(--bg-tertiary)] py-3 lg:flex">
         <div className="discord-rail-icon discord-rail-icon-active" title="image-storage">
           <ImageIcon className="size-6" />
         </div>
@@ -921,9 +1370,26 @@ export function DriveBrowser() {
       </div>
 
       {/* Channel sidebar */}
-      <aside className="flex min-h-0 w-full max-w-[240px] shrink-0 flex-col bg-[var(--bg-secondary)] sm:w-[240px]">
-        <div className="flex h-12 items-center border-b border-[var(--bg-tertiary)] px-4 shadow-sm">
-          <h1 className="truncate font-semibold text-[var(--header-primary)]">image-storage</h1>
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex min-h-0 w-[min(280px,85vw)] shrink-0 flex-col bg-[var(--bg-secondary)] shadow-xl transition-transform duration-200 ease-out lg:relative lg:z-auto lg:w-[240px] lg:translate-x-0 lg:shadow-none",
+          sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+        )}
+      >
+        <div className="flex h-12 items-center gap-2 border-b border-[var(--bg-tertiary)] px-4 shadow-sm">
+          <h1 className="min-w-0 flex-1 truncate font-semibold text-[var(--header-primary)]">
+            image-storage
+          </h1>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 lg:hidden"
+            aria-label="Close navigation"
+            onClick={closeSidebar}
+          >
+            <X className="size-5" />
+          </Button>
         </div>
 
         <ScrollArea className="min-h-0 flex-1 px-2 py-3">
@@ -936,11 +1402,7 @@ export function DriveBrowser() {
               browseMode === "folder" && !folderId && "discord-channel-active",
               sidebarDropHint?.targetId === "root" && "bg-[#5865f2]/20 text-[var(--header-primary)]",
             )}
-            onClick={() => {
-              setBrowseMode("folder");
-              setFolderId(undefined);
-              setTagFilter(undefined);
-            }}
+            onClick={() => navigateToFolder(undefined)}
             onDragOver={(e) => {
               e.preventDefault();
               setSidebarDropHint({ targetId: "root", position: "inside" });
@@ -962,6 +1424,7 @@ export function DriveBrowser() {
               setBrowseMode("favorites");
               setFolderId(undefined);
               setTagFilter(undefined);
+              closeSidebar();
             }}
           >
             <Star className="size-5 shrink-0 text-[#f0b232]" />
@@ -977,6 +1440,7 @@ export function DriveBrowser() {
               setBrowseMode("timeline");
               setFolderId(undefined);
               setTagFilter(undefined);
+              closeSidebar();
             }}
           >
             <Calendar className="size-5 shrink-0 opacity-70" />
@@ -992,6 +1456,7 @@ export function DriveBrowser() {
               setBrowseMode("trash");
               setFolderId(undefined);
               setTagFilter(undefined);
+              closeSidebar();
             }}
           >
             <Trash2 className="size-5 shrink-0 opacity-70" />
@@ -1039,7 +1504,8 @@ export function DriveBrowser() {
                   onDragStart={(e) => onFolderDragStart(e, f.id)}
                   onDragEnd={onFolderDragEnd}
                   className={cn(
-                    "group discord-channel w-full cursor-grab items-center gap-0.5 pr-1",
+                    "group discord-channel w-full items-center gap-0.5 pr-1",
+                    DRIVE_SELECT_SURFACE,
                     active && "discord-channel-active",
                     dropHint?.position === "inside" &&
                       "bg-[#5865f2]/20 ring-1 ring-[#5865f2]/50",
@@ -1057,13 +1523,13 @@ export function DriveBrowser() {
                 >
                   <button
                     type="button"
-                    className="flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent p-0 text-left text-inherit outline-none"
+                    className={cn(
+                      DRIVE_OPEN_SURFACE,
+                      "flex min-w-0 flex-1 items-center gap-1.5 border-0 bg-transparent p-0 text-left text-inherit outline-none",
+                    )}
                     title={f.path}
-                    onClick={() => {
-                      setBrowseMode("folder");
-                      setFolderId(f.id);
-                      setTagFilter(undefined);
-                    }}
+                    onClick={() => navigateToFolder(f.id)}
+                    onMouseEnter={() => prefetchFolderListing(f.id)}
                   >
                     <FolderOpen className="size-5 shrink-0 text-[#f0b232]" />
                     <div className="min-w-0 flex-1">
@@ -1075,8 +1541,8 @@ export function DriveBrowser() {
                   </button>
                   <div
                     className={cn(
-                      "shrink-0 self-center opacity-0 transition-opacity group-hover:opacity-100",
-                      active && "opacity-100",
+                      "shrink-0 self-center opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100",
+                      active && "md:opacity-100",
                     )}
                   >
                     <FolderMenu folder={folderRow} />
@@ -1098,19 +1564,31 @@ export function DriveBrowser() {
 
       {/* Main content */}
       <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-[var(--bg-tertiary)] px-4 py-2">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <header className="flex min-h-14 shrink-0 flex-wrap items-center gap-x-2 gap-y-2 border-b border-[var(--bg-tertiary)] px-3 py-2 sm:gap-x-3 sm:px-4">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="shrink-0 lg:hidden"
+            aria-label="Open navigation"
+            onClick={() => setSidebarOpen(true)}
+          >
+            <Menu className="size-5" />
+          </Button>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
             {browseMode === "folder" ? (
               <DriveBreadcrumbs crumbs={crumbs} onNavigate={navigateToFolder} />
             ) : (
               <>
-                <HeaderIcon className="size-6 shrink-0 text-[#f0b232]" />
-                <span className="text-[20px] font-normal text-[var(--header-primary)]">{locationLabel}</span>
+                <HeaderIcon className="size-5 shrink-0 text-[#f0b232] sm:size-6" />
+                <span className="truncate text-base font-normal text-[var(--header-primary)] sm:text-[20px]">
+                  {locationLabel}
+                </span>
               </>
             )}
             {selectedCount > 0 ? (
               <div
-                className="flex flex-wrap items-center gap-1.5 border-l border-[var(--border)] pl-3"
+                className="hidden flex-wrap items-center gap-1.5 border-l border-[var(--border)] pl-3 md:flex"
                 data-no-marquee
               >
                 <span className="text-[13px] font-medium text-[var(--header-primary)]">
@@ -1143,7 +1621,7 @@ export function DriveBrowser() {
                   size="sm"
                   variant="ghost"
                   className="h-7 rounded-[3px] px-2 text-[12px]"
-                  onClick={clearSelection}
+                  onClick={clearAllSelection}
                 >
                   <X className="size-3.5" />
                   Clear
@@ -1151,12 +1629,12 @@ export function DriveBrowser() {
               </div>
             ) : null}
           </div>
-          <span className="hidden text-[12px] text-[var(--muted-foreground)] sm:inline">
+          <span className="hidden text-[12px] text-[var(--muted-foreground)] lg:inline">
             {browseMode === "folder" ? `${filteredFolders.length} folders ` : ""}
             {imageCount} images
             {tagFilter ? `tag: ${tagFilter}` : ""}
           </span>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             {isDev ? (
               <Button
                 variant="ghost"
@@ -1172,8 +1650,8 @@ export function DriveBrowser() {
           </div>
         </header>
 
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--bg-tertiary)] px-4 py-3">
-          <div className="relative min-w-[180px] flex-1 sm:max-w-xs">
+        <div className="flex flex-col gap-2 border-b border-[var(--bg-tertiary)] px-3 py-2 sm:flex-row sm:flex-wrap sm:items-center sm:px-4 sm:py-3">
+          <div className="relative min-w-0 flex-1 sm:max-w-xs">
             <Search className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-[var(--muted-foreground)]" />
             <Input
               value={query}
@@ -1181,101 +1659,169 @@ export function DriveBrowser() {
               placeholder={
                 browseMode === "folder" ? "Search in folder" : `Search in ${locationLabel.toLowerCase()}`
               }
-              className="h-8 border-0 bg-[var(--input)] pl-8 text-[14px] rounded-[4px]"
+              className="h-8 w-full border-0 bg-[var(--input)] pl-8 text-[14px] rounded-[4px]"
             />
           </div>
-          {browseMode === "folder" ? (
-            <Button
-              size="sm"
-              className="h-8 rounded-[3px] bg-[#5865f2] hover:bg-[#4752c4]"
-              onClick={() => setNewFolderOpen(true)}
-            >
-              <FolderPlus className="size-4" />
-              New folder
-            </Button>
-          ) : null}
-          {allowUpload ? (
-            <Button
-              size="sm"
-              variant="secondary"
-              className="h-8 rounded-[3px] bg-[#4e5058] hover:bg-[#6d6f78]"
-              onClick={() => fileRef.current?.click()}
-            >
-              <Upload className="size-4" />
-              Upload
-            </Button>
-          ) : null}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            multiple
-            className="hidden"
-            onChange={(e) => onUpload(e.target.files)}
-          />
-          {browseMode === "folder" && allTags.length > 0 ? (
-            <Select
-              value={tagFilter ?? "__all__"}
-              onValueChange={(v) => setTagFilter(v === "__all__" ? undefined : v ?? undefined)}
-            >
-              <SelectTrigger className="h-8 w-[130px] border-0 bg-[var(--input)] rounded-[4px]" size="sm">
-                <SelectValue placeholder="All tags">
-                  {(value) => {
-                    if (!value || value === "__all__") return "All tags";
-                    const tag = allTags.find((t) => t.name === value);
-                    return tag ? `${tag.name} (${tag.imageCount})` : String(value);
-                  }}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">All tags</SelectItem>
-                {allTags.map((t) => (
-                  <SelectItem key={t.name} value={t.name}>
-                    {t.name} ({t.imageCount})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : null}
-          {browseMode !== "timeline" ? (
-          <Select value={sort} onValueChange={(v) => v && setSort(v as Sort)}>
-            <SelectTrigger className="h-8 w-[110px] border-0 bg-[var(--input)] rounded-[4px]" size="sm">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="date">Date</SelectItem>
-              <SelectItem value="size">Size</SelectItem>
-            </SelectContent>
-          </Select>
-          ) : null}
-          {browseMode !== "timeline" ? (
-          <div className="flex gap-0.5 rounded-[4px] bg-[var(--bg-tertiary)] p-0.5">
-            {(
-              [
-                ["grid-large", LayoutGrid, "Large icons"],
-                ["grid-medium", Grid2x2, "Medium icons"],
-                ["grid-small", Grid3x3, "Small icons"],
-                ["list", List, "List"],
-                ["detail", Rows3, "Details"],
-              ] as const
-            ).map(([mode, Icon, label]) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {browseMode === "folder" ? (
               <Button
-                key={mode}
-                type="button"
-                size="icon-xs"
-                variant="ghost"
-                title={label}
-                className={cn(
-                  "rounded-[3px]",
-                  view === mode && "bg-[var(--modifier-selected)] text-[var(--header-primary)]",
-                )}
-                onClick={() => setView(mode)}
+                size="sm"
+                className="h-8 rounded-[3px] bg-[#5865f2] hover:bg-[#4752c4]"
+                onClick={() => setNewFolderOpen(true)}
               >
-                <Icon className="size-4" />
+                <FolderPlus className="size-4" />
+                <span className="hidden sm:inline">New folder</span>
               </Button>
-            ))}
+            ) : null}
+            {browseMode === "trash" && images.length > 0 ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 rounded-[3px] text-[#f23f43] hover:bg-[#f23f43]/10 hover:text-[#f23f43]"
+                onClick={askEmptyTrash}
+              >
+                <Trash2 className="size-4" />
+                <span className="hidden sm:inline">Delete all</span>
+              </Button>
+            ) : null}
+            {allowUpload ? (
+              <Button
+                size="sm"
+                variant="secondary"
+                className="h-8 rounded-[3px] bg-[#4e5058] hover:bg-[#6d6f78]"
+                onClick={() => fileRef.current?.click()}
+                title={`Upload up to ${uploadLimit} images${user?.autoTagEnabled ? " (auto-tagging on)" : ""}`}
+              >
+                <Upload className="size-4" />
+                <span className="hidden sm:inline">Upload</span>
+              </Button>
+            ) : null}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={(e) => onUpload(e.target.files)}
+            />
+            {browseMode === "folder" && allTags.length > 0 ? (
+              <Select
+                value={tagFilter ?? "__all__"}
+                onValueChange={(v) => setTagFilter(v === "__all__" ? undefined : v ?? undefined)}
+              >
+                <SelectTrigger className="hidden h-8 w-[130px] border-0 bg-[var(--input)] rounded-[4px] md:flex" size="sm">
+                  <SelectValue placeholder="All tags">
+                    {(value) => {
+                      if (!value || value === "__all__") return "All tags";
+                      const tag = allTags.find((t) => t.name === value);
+                      return tag ? `${tag.name} (${tag.imageCount})` : String(value);
+                    }}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all__">All tags</SelectItem>
+                  {allTags.map((t) => (
+                    <SelectItem key={t.name} value={t.name}>
+                      {t.name} ({t.imageCount})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
+            {browseMode !== "timeline" ? (
+              <Select value={sort} onValueChange={(v) => v && setSort(v as Sort)}>
+                <SelectTrigger className="hidden h-8 w-[110px] border-0 bg-[var(--input)] rounded-[4px] md:flex" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="date">Date</SelectItem>
+                  <SelectItem value="size">Size</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : null}
+            {browseMode !== "timeline" ? (
+              <div className="hidden gap-0.5 rounded-[4px] bg-[var(--bg-tertiary)] p-0.5 md:flex">
+                {(
+                  [
+                    ["grid-large", LayoutGrid, "Large icons"],
+                    ["grid-medium", Grid2x2, "Medium icons"],
+                    ["grid-small", Grid3x3, "Small icons"],
+                    ["list", List, "List"],
+                    ["detail", Rows3, "Details"],
+                  ] as const
+                ).map(([mode, Icon, label]) => (
+                  <Button
+                    key={mode}
+                    type="button"
+                    size="icon-xs"
+                    variant="ghost"
+                    title={label}
+                    className={cn(
+                      "rounded-[3px]",
+                      view === mode && "bg-[var(--modifier-selected)] text-[var(--header-primary)]",
+                    )}
+                    onClick={() => setView(mode)}
+                  >
+                    <Icon className="size-4" />
+                  </Button>
+                ))}
+              </div>
+            ) : null}
           </div>
+          {browseMode !== "timeline" ? (
+            <div className="flex w-full flex-wrap items-center gap-2 md:hidden">
+              <Select value={view} onValueChange={(v) => v && setView(v as ViewMode)}>
+                <SelectTrigger className="h-8 min-w-0 flex-1 border-0 bg-[var(--input)] rounded-[4px]" size="sm">
+                  <SelectValue placeholder="View">
+                    {(value) =>
+                      VIEW_OPTIONS.find((opt) => opt.value === value)?.label ?? "View"
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {VIEW_OPTIONS.map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={sort} onValueChange={(v) => v && setSort(v as Sort)}>
+                <SelectTrigger className="h-8 w-[7.5rem] shrink-0 border-0 bg-[var(--input)] rounded-[4px]" size="sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="name">Name</SelectItem>
+                  <SelectItem value="date">Date</SelectItem>
+                  <SelectItem value="size">Size</SelectItem>
+                </SelectContent>
+              </Select>
+              {browseMode === "folder" && allTags.length > 0 ? (
+                <Select
+                  value={tagFilter ?? "__all__"}
+                  onValueChange={(v) => setTagFilter(v === "__all__" ? undefined : v ?? undefined)}
+                >
+                  <SelectTrigger className="h-8 min-w-0 flex-1 border-0 bg-[var(--input)] rounded-[4px]" size="sm">
+                    <SelectValue placeholder="All tags">
+                      {(value) => {
+                        if (!value || value === "__all__") return "All tags";
+                        const tag = allTags.find((t) => t.name === value);
+                        return tag ? `${tag.name} (${tag.imageCount})` : String(value);
+                      }}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__all__">All tags</SelectItem>
+                    {allTags.map((t) => (
+                      <SelectItem key={t.name} value={t.name}>
+                        {t.name} ({t.imageCount})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+            </div>
           ) : null}
         </div>
 
@@ -1288,24 +1834,30 @@ export function DriveBrowser() {
           </div>
         ) : null}
 
-        <ScrollArea className="min-h-0 flex-1 px-4 py-3">
+        <ScrollArea className={cn("min-h-0 flex-1 px-3 py-3 sm:px-4", selectedCount > 0 && "pb-20 md:pb-3")}>
           <ImageMarqueeSurface
-            disabled={empty}
+            disabled={empty || contentLoading}
             onMarqueeSelect={applyMarqueeSelection}
             className="pb-2"
           >
-          {browseMode === "timeline" ? (
+          {contentLoading ? (
+            <div className="flex flex-col items-center justify-center py-20">
+              <Loader2 className="size-8 animate-spin text-[#5865f2]" />
+            </div>
+          ) : browseMode === "timeline" ? (
             <TimelineView
               groups={timelineGroups}
               openPreview={openPreview}
               isImageSelected={isImageSelected}
-              onImageSelectClick={onImageSelectClick}
+              onImageSelectClick={handleImageSelectClick}
               selectedImageIds={selectedImageIds}
               ImageThumb={DriveImageThumb}
               VisibilityBadge={DriveVisibilityBadge}
               ownerLabel={imageOwnerLabel}
               showFavoriteStar={showFavoriteStar}
               onToggleFavorite={toggleFavorite}
+              isImageTagging={isImageTagging}
+              getTaggingElapsed={getTaggingElapsed}
             />
           ) : empty ? (
             <div
@@ -1350,9 +1902,12 @@ export function DriveBrowser() {
               onToggleImages={() => setImagesOpen((o) => !o)}
               dragOverFolder={dragOverFolder}
               setFolderId={navigateToFolder}
+              prefetchFolder={prefetchFolderListing}
+              isFolderSelected={isFolderSelected}
+              onFolderSelectClick={handleFolderSelectClick}
               openPreview={openPreview}
               isImageSelected={isImageSelected}
-              onImageSelectClick={onImageSelectClick}
+              onImageSelectClick={handleImageSelectClick}
               selectedImageIds={selectedImageIds}
               setDragOverFolder={setDragOverFolder}
               onFolderDrop={onFolderDrop}
@@ -1368,6 +1923,8 @@ export function DriveBrowser() {
               showFavoriteStar={showFavoriteStar}
               ownerLabel={imageOwnerLabel}
               onToggleFavorite={toggleFavorite}
+              isImageTagging={isImageTagging}
+              getTaggingElapsed={getTaggingElapsed}
             />
           ) : view === "detail" ? (
             <DetailView
@@ -1379,9 +1936,12 @@ export function DriveBrowser() {
               onToggleImages={() => setImagesOpen((o) => !o)}
               dragOverFolder={dragOverFolder}
               setFolderId={navigateToFolder}
+              prefetchFolder={prefetchFolderListing}
+              isFolderSelected={isFolderSelected}
+              onFolderSelectClick={handleFolderSelectClick}
               openPreview={openPreview}
               isImageSelected={isImageSelected}
-              onImageSelectClick={onImageSelectClick}
+              onImageSelectClick={handleImageSelectClick}
               selectedImageIds={selectedImageIds}
               setDragOverFolder={setDragOverFolder}
               onFolderDrop={onFolderDrop}
@@ -1397,6 +1957,8 @@ export function DriveBrowser() {
               showFavoriteStar={showFavoriteStar}
               ownerLabel={imageOwnerLabel}
               onToggleFavorite={toggleFavorite}
+              isImageTagging={isImageTagging}
+              getTaggingElapsed={getTaggingElapsed}
             />
           ) : (
             <GridView
@@ -1409,9 +1971,12 @@ export function DriveBrowser() {
               onToggleImages={() => setImagesOpen((o) => !o)}
               dragOverFolder={dragOverFolder}
               setFolderId={navigateToFolder}
+              prefetchFolder={prefetchFolderListing}
+              isFolderSelected={isFolderSelected}
+              onFolderSelectClick={handleFolderSelectClick}
               openPreview={openPreview}
               isImageSelected={isImageSelected}
-              onImageSelectClick={onImageSelectClick}
+              onImageSelectClick={handleImageSelectClick}
               selectedImageIds={selectedImageIds}
               setDragOverFolder={setDragOverFolder}
               onFolderDrop={onFolderDrop}
@@ -1427,11 +1992,58 @@ export function DriveBrowser() {
               showFavoriteStar={showFavoriteStar}
               ownerLabel={imageOwnerLabel}
               onToggleFavorite={toggleFavorite}
+              isImageTagging={isImageTagging}
+              getTaggingElapsed={getTaggingElapsed}
             />
           )}
           </ImageMarqueeSurface>
         </ScrollArea>
       </main>
+
+      {selectedCount > 0 ? (
+        <div
+          className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--bg-floating)] px-4 py-3 shadow-[0_-4px_16px_rgba(0,0,0,0.24)] md:hidden"
+          data-no-marquee
+        >
+          <span className="text-[13px] font-medium text-[var(--header-primary)]">
+            {selectedCount} selected
+          </span>
+          <div className="flex items-center gap-1.5">
+            {browseMode !== "trash" ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                className="h-8 rounded-[3px] px-2 text-[12px]"
+                onClick={() => openMoveDialog()}
+              >
+                <FolderInput className="size-3.5" />
+                Move
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-8 rounded-[3px] px-2 text-[12px]"
+              onClick={askBulkTrash}
+            >
+              <Trash2 className="size-3.5" />
+              {browseMode === "trash" ? "Delete" : "Trash"}
+            </Button>
+            <Button
+              type="button"
+              size="icon-sm"
+              variant="ghost"
+              className="rounded-[3px]"
+              aria-label="Clear selection"
+              onClick={clearAllSelection}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {fileDragDepth > 0 ? (
         <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -1474,7 +2086,7 @@ export function DriveBrowser() {
               <DialogHeader className="sr-only">
                 <DialogTitle>Image preview</DialogTitle>
               </DialogHeader>
-              <div className="flex items-center gap-2 px-6 pt-4 pr-12">
+              <div className="flex items-center gap-2 px-4 pt-4 pr-12 sm:px-6">
                 <div className="flex min-w-0 flex-1 items-center gap-1">
                   <Label htmlFor="preview-name" className="sr-only">
                     File name
@@ -1484,7 +2096,7 @@ export function DriveBrowser() {
                     value={previewName}
                     onChange={(e) => setPreviewName(e.target.value)}
                     disabled={browseMode === "trash"}
-                    className="h-10 min-w-0 flex-1 rounded-[3px] border-0 bg-[var(--input)] text-[16px] font-medium text-[var(--header-primary)]"
+                    className="h-10 min-w-0 flex-1 rounded-[3px] border-0 bg-[var(--input)] text-base font-medium text-[var(--header-primary)] sm:text-[16px]"
                     onKeyDown={(e) => e.key === "Enter" && savePreviewChanges()}
                   />
                   <span className="shrink-0 px-1 text-[14px] text-[var(--muted-foreground)]">
@@ -1492,19 +2104,19 @@ export function DriveBrowser() {
                   </span>
                 </div>
               </div>
-              <div className="flex h-[min(50vh,400px)] w-full shrink-0 items-center gap-2 px-4 pt-3">
+              <div className="relative flex h-[min(58dvh,480px)] w-full shrink-0 items-center px-3 pt-3 sm:h-[min(50vh,400px)] sm:gap-2 sm:px-4">
                 <Button
                   type="button"
                   variant="secondary"
                   size="icon"
-                  className="size-10 shrink-0 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] shadow-sm"
+                  className="absolute top-1/2 left-1 z-10 size-9 -translate-y-1/2 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)]/95 shadow-sm sm:static sm:size-10 sm:shrink-0 sm:translate-y-0 sm:bg-[var(--bg-secondary)]"
                   aria-label="Previous image"
                   disabled={!canGoPreviousImage}
                   onClick={selectPreviousImage}
                 >
-                  <ChevronLeft className="size-6" />
+                  <ChevronLeft className="size-5 sm:size-6" />
                 </Button>
-                <div className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[4px] bg-[var(--bg-tertiary)]/30">
+                <div className="relative mx-auto flex h-full min-w-0 flex-1 flex-col overflow-hidden rounded-[4px] bg-[var(--bg-tertiary)]/30 px-10 sm:mx-0 sm:px-0">
                   <Button
                     type="button"
                     variant="secondary"
@@ -1520,19 +2132,19 @@ export function DriveBrowser() {
                       )}
                     />
                   </Button>
-                  <div className="flex min-h-0 flex-1 items-center justify-center">
+                  <div className="relative min-h-0 flex-1">
                     {selected.visibility === "public" ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={api.publicImageUrl(selected.id)}
                         alt={displayImageName(selected.name, selected.mimeType)}
-                        className="max-h-full max-w-full object-contain"
+                        className="absolute inset-0 size-full object-contain"
                       />
                     ) : (
                       <AuthImage
                         src={api.imageFileUrl(selected.id)}
                         alt={displayImageName(selected.name, selected.mimeType)}
-                        className="h-full w-full max-h-full max-w-full object-contain"
+                        className="absolute inset-0 object-contain"
                       />
                     )}
                   </div>
@@ -1541,21 +2153,30 @@ export function DriveBrowser() {
                   type="button"
                   variant="secondary"
                   size="icon"
-                  className="size-10 shrink-0 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] shadow-sm"
+                  className="absolute top-1/2 right-1 z-10 size-9 -translate-y-1/2 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)]/95 shadow-sm sm:static sm:size-10 sm:shrink-0 sm:translate-y-0 sm:bg-[var(--bg-secondary)]"
                   aria-label="Next image"
                   disabled={!canGoNextImage}
                   onClick={selectNextImage}
                 >
-                  <ChevronRight className="size-6" />
+                  <ChevronRight className="size-5 sm:size-6" />
                 </Button>
               </div>
-              <div className="space-y-3 px-6 pb-4 pt-3">
+              <div className="space-y-3 px-4 pb-4 pt-3 sm:px-6">
                 {browseMode !== "trash" ? (
                   <>
                     <div>
                       <Label htmlFor="preview-tags" className="discord-label">
                         Tags
                       </Label>
+                      {isImageTagging(selected.id) ? (
+                        <p className="mt-1 inline-flex items-center gap-1.5 text-[12px] text-[#5865f2]">
+                          <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                          AI is tagging this image…
+                          {getTaggingElapsed(selected.id) > 0
+                            ? ` ${getTaggingElapsed(selected.id)}s`
+                            : null}
+                        </p>
+                      ) : null}
                       <TagChipInput
                         key={selected.id}
                         id="preview-tags"
@@ -1571,11 +2192,19 @@ export function DriveBrowser() {
                   </>
                 ) : null}
                 <p className="text-[12px] text-[var(--muted-foreground)]">
-                  {formatBytes(selected.size)}  {selected.visibility}
-                  {selected.takenAt ? ` ${new Date(selected.takenAt).toLocaleDateString()}` : ""}
+                  {formatBytes(selected.size)} · {selected.visibility}
+                  {selected.takenAt ? ` · ${new Date(selected.takenAt).toLocaleDateString()}` : ""}
                 </p>
+                <a
+                  href={api.imageViewPath(selected.id)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[12px] text-[#5865f2] underline hover:text-[#4752c4]"
+                >
+                  Open in new tab
+                </a>
               </div>
-              <DialogFooter className="-mx-0 -mb-0 mt-2 gap-2 rounded-none border-t border-[var(--border)] bg-[var(--bg-secondary)] px-6 py-4 sm:justify-end">
+              <DialogFooter className="gap-2 border-t border-[var(--border)] bg-[var(--bg-secondary)] px-6 py-4 sm:justify-end">
                 <Button variant="secondary" className="rounded-[3px]" onClick={() => setSelected(null)}>
                   Close
                 </Button>
@@ -1622,8 +2251,8 @@ export function DriveBrowser() {
       </Dialog>
 
       <Dialog open={!!bulkMoveIds?.length} onOpenChange={(o) => !o && setBulkMoveIds(null)}>
-        <DialogContent className="border-[var(--border)] bg-[var(--bg-primary)]">
-          <DialogHeader>
+        <DialogContent className="max-w-[440px] gap-0 overflow-hidden border-[var(--border)] bg-[var(--bg-primary)] p-0">
+          <DialogHeader className="px-5 pt-5 pb-4">
             <DialogTitle className="text-[var(--header-primary)]">
               {bulkMoveIds && bulkMoveIds.length > 1
                 ? `Move ${bulkMoveIds.length} items`
@@ -1638,20 +2267,22 @@ export function DriveBrowser() {
                   : "Move"}
             </DialogTitle>
           </DialogHeader>
-          <Select value={moveTarget} onValueChange={(v) => v && setMoveTarget(v)}>
-            <SelectTrigger className="border-0 bg-[var(--input)]">
-              <SelectValue placeholder="Choose folder" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="root">My Drive (root)</SelectItem>
-              {allFolders.map((f) => (
-                <SelectItem key={f.id} value={f.id}>
-                  {f.path}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <DialogFooter className="bg-[var(--bg-secondary)] -mx-6 -mb-6 px-6 py-4">
+          <div className="px-5 pb-5">
+            <Select value={moveTarget} onValueChange={(v) => v && setMoveTarget(v)}>
+              <SelectTrigger className="border-0 bg-[var(--input)]">
+                <SelectValue placeholder="Choose folder" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="root">My Drive (root)</SelectItem>
+                {allFolders.map((f) => (
+                  <SelectItem key={f.id} value={f.id}>
+                    {f.path}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter className="gap-2 border-t border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4 sm:justify-end">
             <Button variant="secondary" className="rounded-[3px]" onClick={() => setBulkMoveIds(null)}>
               Cancel
             </Button>

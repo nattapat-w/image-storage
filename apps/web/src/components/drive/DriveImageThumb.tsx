@@ -10,10 +10,11 @@ import { cn } from "@/lib/utils";
 type DriveImageThumbProps = {
   img: ImageItem;
   className?: string;
+  shareToken?: string;
 };
 
-function DriveImageThumbComponent({ img, className }: DriveImageThumbProps) {
-  if (img.visibility === "public") {
+function DriveImageThumbComponent({ img, className, shareToken }: DriveImageThumbProps) {
+  if (img.visibility === "public" && !shareToken) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
@@ -23,9 +24,10 @@ function DriveImageThumbComponent({ img, className }: DriveImageThumbProps) {
       />
     );
   }
+
   return (
     <AuthImage
-      src={api.imageFileUrl(img.id)}
+      src={api.imageFileUrl(img.id, shareToken)}
       alt={displayImageName(img.name, img.mimeType)}
       className={cn("rounded-[4px] object-cover", className)}
     />
@@ -37,5 +39,6 @@ export const DriveImageThumb = memo(
   (prev, next) =>
     prev.img.id === next.img.id &&
     prev.img.visibility === next.img.visibility &&
+    prev.shareToken === next.shareToken &&
     prev.className === next.className,
 );

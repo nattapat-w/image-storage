@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import {
   clientRectFromPoints,
+  DRIVE_FOLDER_SELECT_ATTR,
   DRIVE_IMAGE_SELECT_ATTR,
   rectsIntersect,
 } from "@/components/drive/marquee-select";
@@ -25,6 +26,13 @@ function isMarqueeBlockedTarget(target: EventTarget | null): boolean {
     target.closest(
       "button, a, input, textarea, select, [role='menu'], [data-no-marquee], [contenteditable='true']",
     ),
+  );
+}
+
+function isSelectableDriveTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(
+    target.closest(`[${DRIVE_IMAGE_SELECT_ATTR}], [${DRIVE_FOLDER_SELECT_ATTR}]`),
   );
 }
 
@@ -65,9 +73,7 @@ export function ImageMarqueeSurface({
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (disabled || e.button !== 0) return;
     if (isMarqueeBlockedTarget(e.target)) return;
-    if (e.target instanceof HTMLElement && e.target.closest(`[${DRIVE_IMAGE_SELECT_ATTR}]`)) {
-      return;
-    }
+    if (isSelectableDriveTarget(e.target)) return;
 
     e.preventDefault();
     const additive = e.metaKey || e.ctrlKey;

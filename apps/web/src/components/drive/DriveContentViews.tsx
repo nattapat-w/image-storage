@@ -1,9 +1,12 @@
 "use client";
 
 import { FolderOpen } from "lucide-react";
+import { FolderPill, FolderPillRow } from "@/components/drive/FolderPill";
 import { ImageThumbWithFavorite } from "@/components/drive/ImageThumbWithFavorite";
 import { DriveSection } from "@/components/drive/DriveSection";
 import {
+  DRIVE_OPEN_SURFACE,
+  DRIVE_SELECT_SURFACE,
   GRID_THUMB_CLASS,
   IMAGE_CARD_SELECT_BORDER_BASE,
   IMAGE_CARD_SELECTED_CLASS,
@@ -11,11 +14,12 @@ import {
   type ViewMode,
 } from "@/components/drive/constants";
 import { writeImageDragData } from "@/components/drive/image-drag";
-import { DRIVE_IMAGE_SELECT_ATTR } from "@/components/drive/marquee-select";
+import { DRIVE_FOLDER_SELECT_ATTR, DRIVE_IMAGE_SELECT_ATTR } from "@/components/drive/marquee-select";
 import { ImageCardDetails } from "@/components/drive/ImageCardDetails";
 import { formatDriveDate } from "@/components/drive/drive-format";
 import { formatBytes } from "@/lib/api";
 import { imageFileLabel } from "@/lib/image-name";
+import { TruncatedFileName } from "@/components/drive/TruncatedFileName";
 import type { Folder as FolderType, ImageItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -28,6 +32,9 @@ export type DriveContentViewProps = {
   onToggleImages: () => void;
   dragOverFolder: string | null;
   setFolderId: (id: string | undefined) => void;
+  prefetchFolder?: (id: string) => void;
+  isFolderSelected: (id: string) => boolean;
+  onFolderSelectClick: (e: React.MouseEvent, folder: FolderType) => void;
   openPreview: (img: ImageItem) => void;
   isImageSelected: (id: string) => boolean;
   onImageSelectClick: (e: React.MouseEvent, img: ImageItem) => void;
@@ -46,6 +53,8 @@ export type DriveContentViewProps = {
   ownerLabel: string;
   showFavoriteStar: boolean;
   onToggleFavorite: (img: ImageItem) => void;
+  isImageTagging?: (id: string) => boolean;
+  getTaggingElapsed?: (id: string) => number;
 };
 
 function ListTableHead() {
@@ -68,6 +77,9 @@ export function GridView({
   images,
   dragOverFolder,
   setFolderId,
+  prefetchFolder,
+  isFolderSelected,
+  onFolderSelectClick,
   openPreview,
   isImageSelected,
   onImageSelectClick,
@@ -84,59 +96,45 @@ export function GridView({
   showFavoriteStar,
   ownerLabel,
   onToggleFavorite,
+  isImageTagging,
+  getTaggingElapsed,
 }: DriveContentViewProps & { view: ViewMode }) {
   const gridClass = VIEW_GRID[view as keyof typeof VIEW_GRID] ?? VIEW_GRID["grid-medium"];
   const thumbClass = GRID_THUMB_CLASS[view as keyof typeof GRID_THUMB_CLASS] ?? "";
-  const compactFolders = view === "grid-small";
-
   return (
-    <div className="space-y-4">
+    <div>
       {folders.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
+        <FolderPillRow className={images.length > 0 ? "pb-0" : "pb-2"}>
           {folders.map((f) => (
-            <div
+            <FolderPill
               key={f.id}
-              draggable
+              folder={f}
+              isSelected={isFolderSelected(f.id)}
+              isDropTarget={dragOverFolder === f.id}
+              onSelectClick={(e) => onFolderSelectClick(e, f)}
+              onOpen={() => setFolderId(f.id)}
+              onPrefetch={prefetchFolder ? () => prefetchFolder(f.id) : undefined}
               onDragStart={(e) => onFolderDragStart(e, f.id)}
-              className={cn(
-                "group flex max-w-full cursor-grab items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] active:cursor-grabbing hover:bg-[var(--modifier-hover)]",
-                compactFolders ? "h-9 px-2.5" : "h-10 min-w-[12rem] max-w-[16rem] px-3",
-                dragOverFolder === f.id && "ring-2 ring-[#5865f2]",
-              )}
               onDragOver={(e) => {
                 e.preventDefault();
                 setDragOverFolder(f.id);
               }}
               onDragLeave={() => setDragOverFolder(null)}
               onDrop={(e) => onFolderDrop(e, f.id)}
-            >
-              <button
-                type="button"
-                onClick={() => setFolderId(f.id)}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              >
-                <FolderOpen className="size-5 shrink-0 text-[#9aa0a6]" />
-                <span
-                  className="truncate text-[13px] text-[var(--header-primary)]"
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    askRenameFolder(f);
-                  }}
-                  title="Double-click to rename"
-                >
-                  {f.name}
-                </span>
-              </button>
-              <div className="shrink-0 opacity-0 group-hover:opacity-100">
-                <FolderMenu folder={f} />
-              </div>
-            </div>
+              FolderMenu={FolderMenu}
+            />
           ))}
-        </div>
+        </FolderPillRow>
       ) : null}
 
       {images.length > 0 ? (
-        <div className={cn("grid items-stretch p-2", gridClass)}>
+        <div
+          className={cn(
+            "grid items-stretch px-2 pb-2",
+            folders.length > 0 ? "pt-2.5" : "pt-2",
+            gridClass,
+          )}
+        >
           {images.map((img) => (
             <div
               key={img.id}
@@ -144,7 +142,8 @@ export function GridView({
               draggable
               onDragStart={(e) => writeImageDragData(e, img.id, selectedImageIds)}
               className={cn(
-                "group flex h-full cursor-grab flex-col rounded-[8px] border-2 bg-[var(--bg-secondary)] p-2 transition-colors hover:bg-[#35373c] active:cursor-grabbing",
+                "group flex h-full flex-col rounded-[8px] border-2 bg-[var(--bg-secondary)] p-2 transition-colors hover:bg-[#35373c]",
+                DRIVE_SELECT_SURFACE,
                 IMAGE_CARD_SELECT_BORDER_BASE,
                 isImageSelected(img.id) && IMAGE_CARD_SELECTED_CLASS,
               )}
@@ -163,7 +162,10 @@ export function GridView({
                     openPreview(img);
                   }
                 }}
-                className="flex flex-1 flex-col text-left outline-none focus:outline-none focus-visible:outline-none"
+                className={cn(
+                  DRIVE_SELECT_SURFACE,
+                  "flex min-w-0 flex-1 flex-col text-left outline-none focus:outline-none focus-visible:outline-none",
+                )}
               >
                 <ImageThumbWithFavorite
                   img={img}
@@ -172,23 +174,20 @@ export function GridView({
                   showFavorite={showFavoriteStar}
                   onToggleFavorite={onToggleFavorite}
                 />
-                <div
-                  className="mt-2"
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    askRenameImage(img);
-                  }}
-                  title="Double-click to rename"
-                >
+                <div className="mt-2 min-w-0">
                   <ImageCardDetails
                     img={img}
                     ownerLabel={ownerLabel}
                     VisibilityBadge={VisibilityBadge}
                     compact
+                    isTagging={isImageTagging?.(img.id)}
+                    taggingElapsedSec={getTaggingElapsed?.(img.id)}
+                    onOpenPreview={() => openPreview(img)}
+                    onRename={() => askRenameImage(img)}
                   />
                 </div>
               </div>
-              <div className="mt-1 flex justify-end opacity-0 group-hover:opacity-100">
+              <div className="mt-1 flex justify-end opacity-100 md:opacity-0 md:group-hover:opacity-100">
                 <ImageMenu img={img} />
               </div>
             </div>
@@ -201,18 +200,25 @@ export function GridView({
 
 export function ListView(p: DriveContentViewProps) {
   return (
-    <div className="overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]">
-      <table className="w-full text-[14px]">
+    <div className="overflow-x-auto rounded-lg border border-[var(--border)] bg-[var(--bg-secondary)]">
+      <table className="w-full min-w-[320px] text-[14px]">
         <ListTableHead />
         <tbody>
           {p.folders.map((f) => (
             <tr
               key={f.id}
+              {...{ [DRIVE_FOLDER_SELECT_ATTR]: f.id }}
               draggable
               onDragStart={(e) => p.onFolderDragStart(e, f.id)}
+              onClick={(e) => p.onFolderSelectClick(e, f)}
+              onDoubleClick={(e) => {
+                e.preventDefault();
+                p.setFolderId(f.id);
+              }}
               className={cn(
                 "group border-b border-[var(--border)]/60 transition-colors hover:bg-[var(--modifier-hover)]",
-                "cursor-grab active:cursor-grabbing",
+                DRIVE_SELECT_SURFACE,
+                p.isFolderSelected(f.id) && "bg-[#5865f2]/15",
                 p.dragOverFolder === f.id && "bg-[#5865f2]/10",
               )}
               onDragOver={(e) => {
@@ -223,24 +229,23 @@ export function ListView(p: DriveContentViewProps) {
               onDrop={(e) => p.onFolderDrop(e, f.id)}
             >
               <td className="px-3 py-2">
-                <button
-                  type="button"
-                  onClick={() => p.setFolderId(f.id)}
-                  className="flex min-w-0 items-center gap-3 text-[var(--header-primary)] hover:underline"
-                >
+                <div className="flex min-w-0 items-center gap-3 text-[var(--header-primary)]">
                   <FolderOpen className="size-5 shrink-0 text-[#9aa0a6]" />
-                  <span
-                    className="truncate"
-                    onDoubleClick={(e) => {
-                      e.preventDefault();
+                  <button
+                    type="button"
+                    onClick={(e) => {
                       e.stopPropagation();
-                      p.askRenameFolder(f);
+                      p.setFolderId(f.id);
                     }}
-                    title="Double-click to rename"
+                    className={cn(
+                      DRIVE_OPEN_SURFACE,
+                      "w-fit max-w-full min-w-0 truncate text-left hover:underline",
+                    )}
+                    title="Click to open folder"
                   >
                     {f.name}
-                  </span>
-                </button>
+                  </button>
+                </div>
               </td>
               <td className="hidden px-3 py-2 text-[var(--muted-foreground)] md:table-cell">
                 {p.ownerLabel}
@@ -249,8 +254,12 @@ export function ListView(p: DriveContentViewProps) {
                 {formatDriveDate(f.updatedAt)}
               </td>
               <td className="hidden px-3 py-2 text-right text-[var(--muted-foreground)] sm:table-cell">—</td>
-              <td className="px-2 py-2">
-                <div className="opacity-0 group-hover:opacity-100">
+              <td
+                className="px-2 py-2"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100">
                   <p.FolderMenu folder={f} />
                 </div>
               </td>
@@ -263,36 +272,45 @@ export function ListView(p: DriveContentViewProps) {
               draggable
               onDragStart={(e) => writeImageDragData(e, img.id, p.selectedImageIds)}
               className={cn(
-                "group cursor-grab border-b border-[var(--border)]/60 hover:bg-[var(--modifier-hover)] active:cursor-grabbing",
+                "group border-b border-[var(--border)]/60 hover:bg-[var(--modifier-hover)]",
+                DRIVE_SELECT_SURFACE,
                 p.isImageSelected(img.id) && "bg-[#5865f2]/15",
               )}
             >
               <td className="px-3 py-2">
-                <div className="flex min-w-0 items-center gap-3">
+                <div
+                  className={cn(DRIVE_SELECT_SURFACE, "flex min-w-0 items-center gap-3")}
+                  onClick={(e) => p.onImageSelectClick(e, img)}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    p.openPreview(img);
+                  }}
+                >
                   <ImageThumbWithFavorite
                     img={img}
                     className="size-6 shrink-0 rounded-sm"
                     ImageThumb={p.ImageThumb}
                     showFavorite={false}
                     onToggleFavorite={p.onToggleFavorite}
+                    compact
                   />
                   <button
                     type="button"
-                    onClick={(e) => p.onImageSelectClick(e, img)}
-                    onDoubleClick={(e) => {
-                      e.preventDefault();
+                    onClick={(e) => {
+                      e.stopPropagation();
                       p.openPreview(img);
                     }}
-                    className="min-w-0 flex-1 truncate text-left text-[var(--header-primary)] hover:underline"
+                    onDoubleClick={(e) => {
+                      e.stopPropagation();
+                      p.askRenameImage(img);
+                    }}
+                    className={cn(
+                      DRIVE_OPEN_SURFACE,
+                      "w-fit max-w-full min-w-0 text-left hover:underline",
+                    )}
+                    title="Click to preview · Double-click to rename"
                   >
-                    <span
-                      onDoubleClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        p.askRenameImage(img);
-                      }}
-                      title="Double-click to rename"
-                    >
+                    <span className="block max-w-full truncate">
                       {imageFileLabel(img.name, img.mimeType)}
                     </span>
                   </button>
@@ -308,7 +326,7 @@ export function ListView(p: DriveContentViewProps) {
                 {formatBytes(img.size)}
               </td>
               <td className="px-2 py-2">
-                <div className="opacity-0 group-hover:opacity-100">
+                <div className="opacity-100 md:opacity-0 md:group-hover:opacity-100">
                   <p.ImageMenu img={img} />
                 </div>
               </td>
@@ -324,35 +342,27 @@ export function DetailView(p: DriveContentViewProps) {
   return (
     <div className="space-y-5">
       {p.folders.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
+        <FolderPillRow className="pb-2">
           {p.folders.map((f) => (
-            <div
+            <FolderPill
               key={f.id}
-              draggable
+              folder={f}
+              isSelected={p.isFolderSelected(f.id)}
+              isDropTarget={p.dragOverFolder === f.id}
+              onSelectClick={(e) => p.onFolderSelectClick(e, f)}
+              onOpen={() => p.setFolderId(f.id)}
+              onPrefetch={p.prefetchFolder ? () => p.prefetchFolder!(f.id) : undefined}
               onDragStart={(e) => p.onFolderDragStart(e, f.id)}
-              className={cn(
-                "group flex h-10 min-w-[12rem] max-w-[16rem] cursor-grab items-center gap-2 rounded-full border border-[var(--border)] bg-[var(--bg-secondary)] px-3 active:cursor-grabbing hover:bg-[var(--modifier-hover)]",
-                p.dragOverFolder === f.id && "ring-2 ring-[#5865f2]",
-              )}
               onDragOver={(e) => {
                 e.preventDefault();
                 p.setDragOverFolder(f.id);
               }}
               onDragLeave={() => p.setDragOverFolder(null)}
               onDrop={(e) => p.onFolderDrop(e, f.id)}
-            >
-              <button
-                type="button"
-                onClick={() => p.setFolderId(f.id)}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
-              >
-                <FolderOpen className="size-5 shrink-0 text-[#9aa0a6]" />
-                <span className="truncate text-[13px]">{f.name}</span>
-              </button>
-              <p.FolderMenu folder={f} />
-            </div>
+              FolderMenu={p.FolderMenu}
+            />
           ))}
-        </div>
+        </FolderPillRow>
       ) : null}
 
       <DriveSection
@@ -370,6 +380,7 @@ export function DetailView(p: DriveContentViewProps) {
               onDragStart={(e) => writeImageDragData(e, img.id, p.selectedImageIds)}
               className={cn(
                 "group flex flex-col gap-3 rounded-[8px] border-2 bg-[var(--bg-secondary)] p-4 sm:flex-row sm:items-center hover:bg-[#35373c]",
+                DRIVE_SELECT_SURFACE,
                 IMAGE_CARD_SELECT_BORDER_BASE,
                 p.isImageSelected(img.id) && IMAGE_CARD_SELECTED_CLASS,
               )}
@@ -388,7 +399,7 @@ export function DetailView(p: DriveContentViewProps) {
                     p.openPreview(img);
                   }
                 }}
-                className="shrink-0 cursor-pointer"
+                className={cn(DRIVE_SELECT_SURFACE, "shrink-0")}
               >
                 <ImageThumbWithFavorite
                   img={img}
@@ -407,6 +418,10 @@ export function DetailView(p: DriveContentViewProps) {
                   img={img}
                   ownerLabel={p.ownerLabel}
                   VisibilityBadge={p.VisibilityBadge}
+                  isTagging={p.isImageTagging?.(img.id)}
+                  taggingElapsedSec={p.getTaggingElapsed?.(img.id)}
+                  onOpenPreview={() => p.openPreview(img)}
+                  onRename={() => p.askRenameImage(img)}
                 />
               </div>
               <p.ImageMenu img={img} />

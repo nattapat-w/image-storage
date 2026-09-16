@@ -2,6 +2,7 @@ export type User = {
   id: string;
   email: string;
   displayName?: string;
+  autoTagEnabled?: boolean;
   createdAt?: string;
 };
 
@@ -13,6 +14,14 @@ export type Folder = {
   totalSize: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AutoTagJob = {
+  imageId: string;
+  state: "running" | "done" | "failed";
+  startedAt: string;
+  elapsedSec: number;
+  error?: string;
 };
 
 export type ImageItem = {

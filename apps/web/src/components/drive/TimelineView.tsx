@@ -10,6 +10,7 @@ import { ImageThumbWithFavorite } from "@/components/drive/ImageThumbWithFavorit
 
 import { writeImageDragData } from "@/components/drive/image-drag";
 import {
+  DRIVE_SELECT_SURFACE,
   IMAGE_CARD_SELECT_BORDER_BASE,
   IMAGE_CARD_SELECTED_CLASS,
 } from "@/components/drive/constants";
@@ -41,6 +42,10 @@ type TimelineViewProps = {
 
   onToggleFavorite: (img: ImageItem) => void;
 
+  isImageTagging?: (id: string) => boolean;
+
+  getTaggingElapsed?: (id: string) => number;
+
 };
 
 
@@ -66,6 +71,10 @@ export function TimelineView({
   showFavoriteStar,
 
   onToggleFavorite,
+
+  isImageTagging,
+
+  getTaggingElapsed,
 
 }: TimelineViewProps) {
 
@@ -140,7 +149,8 @@ export function TimelineView({
                 }}
 
                 className={cn(
-                  "group flex h-full cursor-grab flex-col rounded-[8px] border-2 bg-[var(--bg-secondary)] p-2 text-left outline-none transition-colors hover:bg-[#35373c] active:cursor-grabbing focus:outline-none focus-visible:outline-none",
+                  "group flex h-full flex-col rounded-[8px] border-2 bg-[var(--bg-secondary)] p-2 text-left outline-none transition-colors hover:bg-[#35373c] focus:outline-none focus-visible:outline-none",
+                  DRIVE_SELECT_SURFACE,
                   IMAGE_CARD_SELECT_BORDER_BASE,
                   isImageSelected(img.id) && IMAGE_CARD_SELECTED_CLASS,
                 )}
@@ -158,23 +168,18 @@ export function TimelineView({
                   showFavorite={showFavoriteStar}
 
                   onToggleFavorite={onToggleFavorite}
-
                 />
 
-                <div className="mt-2">
-
+                <div className="mt-2 min-w-0">
                   <ImageCardDetails
-
                     img={img}
-
                     ownerLabel={ownerLabel}
-
                     VisibilityBadge={VisibilityBadge}
-
                     compact
-
+                    isTagging={isImageTagging?.(img.id)}
+                    taggingElapsedSec={getTaggingElapsed?.(img.id)}
+                    onOpenPreview={() => openPreview(img)}
                   />
-
                 </div>
 
               </div>

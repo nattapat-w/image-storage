@@ -28,14 +28,14 @@ export function ConfirmDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[440px] gap-0 border-[var(--border)] bg-[var(--bg-primary)] p-0">
-        <DialogHeader className="px-4 pt-4 pb-2 text-center">
+      <DialogContent className="max-w-[440px] gap-0 overflow-hidden border-[var(--border)] bg-[var(--bg-primary)] p-0">
+        <DialogHeader className="px-5 pt-5 pb-4 text-center">
           <DialogTitle className="text-[20px] font-semibold text-[var(--header-primary)]">
             {title}
           </DialogTitle>
           <p className="mt-2 text-[16px] text-[var(--foreground)]">{message}</p>
         </DialogHeader>
-        <DialogFooter className="mt-4 gap-2 bg-[var(--bg-secondary)] px-4 py-4 sm:justify-end">
+        <DialogFooter className="gap-2 border-t border-[var(--border)] bg-[var(--bg-secondary)] px-5 py-4 sm:justify-end">
           <Button
             variant="secondary"
             className="min-h-[38px] rounded-[3px] bg-[#4e5058] hover:bg-[#6d6f78]"

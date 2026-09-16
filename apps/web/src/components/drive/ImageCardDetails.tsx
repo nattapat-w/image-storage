@@ -1,8 +1,11 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { formatDriveDate } from "@/components/drive/drive-format";
+import { DRIVE_OPEN_SURFACE } from "@/components/drive/constants";
 import { formatBytes } from "@/lib/api";
 import { imageFileLabel } from "@/lib/image-name";
+import { TruncatedFileName } from "@/components/drive/TruncatedFileName";
 import type { ImageItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -12,6 +15,10 @@ type ImageCardDetailsProps = {
   VisibilityBadge: React.ComponentType<{ visibility: string }>;
   compact?: boolean;
   className?: string;
+  isTagging?: boolean;
+  taggingElapsedSec?: number;
+  onOpenPreview?: () => void;
+  onRename?: () => void;
 };
 
 export function ImageCardDetails({
@@ -20,8 +27,15 @@ export function ImageCardDetails({
   VisibilityBadge,
   compact = false,
   className,
+  isTagging = false,
+  taggingElapsedSec,
+  onOpenPreview,
+  onRename,
 }: ImageCardDetailsProps) {
-  const fileName = imageFileLabel(img.name, img.mimeType);
+  const nameClassName = cn(
+    "font-medium text-[var(--header-primary)]",
+    compact ? "text-[13px]" : "text-[16px]",
+  );
 
   return (
     <div
@@ -31,15 +45,32 @@ export function ImageCardDetails({
         className,
       )}
     >
-      <p
-        className={cn(
-          "line-clamp-1 shrink-0 font-medium text-[var(--header-primary)]",
-          compact ? "text-[13px]" : "text-[16px]",
-        )}
-        title={fileName}
-      >
-        {fileName}
-      </p>
+      {onOpenPreview ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onOpenPreview();
+          }}
+          onDoubleClick={(e) => {
+            e.stopPropagation();
+            onRename?.();
+          }}
+          className={cn(
+            DRIVE_OPEN_SURFACE,
+            "w-fit max-w-full min-w-0 text-left hover:underline",
+            nameClassName,
+          )}
+          title={imageFileLabel(img.name, img.mimeType)}
+        >
+          <span className="block max-w-full truncate">
+            {imageFileLabel(img.name, img.mimeType)}
+          </span>
+        </button>
+      ) : (
+        <TruncatedFileName as="p" name={img.name} mimeType={img.mimeType} className={nameClassName} />
+      )}
       <p className="mt-1.5 shrink-0 text-[11px] text-[var(--muted-foreground)]">
         Posted by{" "}
         <span className="text-[var(--header-secondary)]">{ownerLabel}</span>
@@ -49,8 +80,14 @@ export function ImageCardDetails({
       <div className="mt-1 shrink-0">
         <VisibilityBadge visibility={img.visibility} />
       </div>
-      {img.tags.length > 0 ? (
-        <div className="mt-1 flex flex-wrap gap-1 overflow-hidden">
+      {isTagging ? (
+        <p className="mt-2.5 inline-flex items-center gap-1 text-[10px] text-[#5865f2]">
+          <Loader2 className="size-3 animate-spin" aria-hidden />
+          AI tagging…
+          {taggingElapsedSec != null && taggingElapsedSec > 0 ? ` ${taggingElapsedSec}s` : null}
+        </p>
+      ) : img.tags.length > 0 ? (
+        <div className="mt-2.5 flex flex-wrap gap-1 overflow-hidden">
           {img.tags.map((tag) => (
             <span
               key={tag}
