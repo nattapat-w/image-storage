@@ -3,9 +3,12 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { AuthImage } from "@/components/AuthImage";
-import { api, formatBytes } from "@/lib/api";
-import { displayImageName } from "@/lib/image-name";
+import { AlertCircle, Loader2 } from "lucide-react";
+import { ShareFolderView } from "@/components/share/ShareFolderView";
+import { ShareImageView } from "@/components/share/ShareImageView";
+import { SharePageShell } from "@/components/share/SharePageShell";
+import { Button } from "@/components/ui/button";
+import { api } from "@/lib/api";
 import type { ShareView } from "@/lib/types";
 
 export default function SharePage() {
@@ -17,68 +20,48 @@ export default function SharePage() {
     api
       .viewShare(token)
       .then(setData)
-      .catch(() => setError("Share link invalid or expired"));
+      .catch(() => setError("This share link is invalid or has expired."));
   }, [token]);
 
   if (error) {
     return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-zinc-500">{error}</p>
-      </main>
-    );
-  }
-  if (!data) {
-    return (
-      <main className="flex min-h-screen items-center justify-center">
-        <p className="text-zinc-500">Loading…</p>
-      </main>
+      <SharePageShell>
+        <div className="flex flex-1 items-center justify-center px-4 py-16">
+          <div className="w-full max-w-md rounded-xl border border-[var(--border)] bg-[var(--bg-secondary)] p-8 text-center">
+            <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-[var(--destructive)]/15">
+              <AlertCircle className="size-6 text-[var(--destructive)]" aria-hidden />
+            </div>
+            <h1 className="mt-4 font-heading text-lg font-semibold text-[var(--header-primary)]">
+              Link unavailable
+            </h1>
+            <p className="mt-2 text-sm text-[var(--muted-foreground)]">{error}</p>
+            <Button className="mt-6" nativeButton={false} render={<Link href="/login" />}>
+              Sign in
+            </Button>
+          </div>
+        </div>
+      </SharePageShell>
     );
   }
 
-  if (data.type === "image") {
-    const img = data.image;
+  if (!data) {
     return (
-      <main className="flex min-h-screen flex-col items-center justify-center gap-4 bg-zinc-50 p-6 dark:bg-zinc-950">
-        <AuthImage
-          src={api.imageFileUrl(img.id, token)}
-          alt={displayImageName(img.name, img.mimeType)}
-          className="max-h-[80vh] max-w-full rounded-xl object-contain"
-        />
-        <p className="font-medium">{displayImageName(img.name, img.mimeType)}</p>
-        <p className="text-sm text-zinc-500">{formatBytes(img.size)}</p>
-        <Link href="/" className="text-sm text-blue-600 underline">
-          Home
-        </Link>
-      </main>
+      <SharePageShell>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 py-24 text-[var(--muted-foreground)]">
+          <Loader2 className="size-8 animate-spin text-[#5865f2]" aria-hidden />
+          <p className="text-sm">Loading shared content…</p>
+        </div>
+      </SharePageShell>
     );
   }
 
   return (
-    <main className="min-h-screen bg-zinc-50 p-6 dark:bg-zinc-950">
-      <h1 className="mb-4 text-xl font-semibold">Shared folder</h1>
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {data.folders.map((f) => (
-          <div key={f.id} className="rounded-xl border bg-white p-4 text-center dark:bg-zinc-900">
-            <span className="text-3xl">📁</span>
-            <p className="mt-1 truncate text-sm">{f.name}</p>
-          </div>
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        {data.images.map((img) => (
-          <div key={img.id} className="rounded-xl border bg-white p-2 dark:bg-zinc-900">
-            <AuthImage
-              src={api.imageFileUrl(img.id, token)}
-              alt={displayImageName(img.name, img.mimeType)}
-              className="aspect-square w-full rounded-lg object-cover"
-            />
-            <p className="mt-1 truncate text-xs">{displayImageName(img.name, img.mimeType)}</p>
-          </div>
-        ))}
-      </div>
-      <Link href="/" className="mt-6 inline-block text-sm text-blue-600 underline">
-        Home
-      </Link>
-    </main>
+    <SharePageShell>
+      {data.type === "image" ? (
+        <ShareImageView img={data.image} token={token} />
+      ) : (
+        <ShareFolderView folders={data.folders} images={data.images} token={token} />
+      )}
+    </SharePageShell>
   );
 }
