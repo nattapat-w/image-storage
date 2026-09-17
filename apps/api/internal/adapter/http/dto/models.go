@@ -9,21 +9,23 @@ type User struct {
 }
 
 type Folder struct {
-	ID         string  `json:"id"`
-	ParentID   *string `json:"parentId"`
-	Name       string  `json:"name"`
-	ImageCount int64   `json:"imageCount"`
-	TotalSize  int64   `json:"totalSize"`
-	CreatedAt  string  `json:"createdAt"`
-	UpdatedAt  string  `json:"updatedAt"`
+	ID            string  `json:"id"`
+	ParentID      *string `json:"parentId"`
+	Name          string  `json:"name"`
+	IsShareFolder bool    `json:"isShareFolder"`
+	ImageCount    int64   `json:"imageCount"`
+	TotalSize     int64   `json:"totalSize"`
+	CreatedAt     string  `json:"createdAt"`
+	UpdatedAt     string  `json:"updatedAt"`
 }
 
 type FolderOption struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	ImageCount int64  `json:"imageCount"`
-	TotalSize  int64  `json:"totalSize"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	Path          string `json:"path"`
+	ImageCount    int64  `json:"imageCount"`
+	TotalSize     int64  `json:"totalSize"`
+	IsShareFolder bool   `json:"isShareFolder"`
 }
 
 type Image struct {
@@ -37,9 +39,11 @@ type Image struct {
 	ContentHash string   `json:"contentHash,omitempty"`
 	TakenAt     *string  `json:"takenAt"`
 	DeletedAt   *string  `json:"deletedAt,omitempty"`
-	Tags        []string `json:"tags"`
-	CreatedAt   string   `json:"createdAt"`
-	UpdatedAt   string   `json:"updatedAt"`
+	Tags                  []string `json:"tags"`
+	UploadedBy            string   `json:"uploadedBy,omitempty"`
+	UploadedByDisplayName string   `json:"uploadedByDisplayName,omitempty"`
+	CreatedAt             string   `json:"createdAt"`
+	UpdatedAt             string   `json:"updatedAt"`
 }
 
 type Tag struct {
@@ -55,12 +59,13 @@ type TimelineGroup struct {
 }
 
 type Share struct {
-	ID           string `json:"id"`
-	ResourceType string `json:"resourceType"`
-	ResourceID   string `json:"resourceId"`
-	Token        string `json:"token"`
-	URL          string `json:"url"`
-	CreatedAt    string `json:"createdAt"`
+	ID           string  `json:"id"`
+	ResourceType string  `json:"resourceType"`
+	ResourceID   string  `json:"resourceId"`
+	Token        string  `json:"token"`
+	URL          string  `json:"url"`
+	ExpiresAt    *string `json:"expiresAt,omitempty"`
+	CreatedAt    string  `json:"createdAt"`
 }
 
 type Breadcrumb struct {

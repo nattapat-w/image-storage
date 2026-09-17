@@ -3,6 +3,46 @@ import type { FolderOption } from "./types";
 export const SIDEBAR_INDENT_PX = 12;
 export const SIDEBAR_BASE_PX = 20;
 
+/** Max folder path depth (root child = 1 level). */
+export const MAX_FOLDER_NESTING = 4;
+
+export function folderPathLevel(folder: FolderOption): number {
+  return folder.path.split(" / ").length;
+}
+
+export function subtreePathLevels(folder: FolderOption, all: FolderOption[]): number {
+  const prefix = `${folder.path} / `;
+  let max = folderPathLevel(folder);
+  for (const f of all) {
+    if (f.id === folder.id || f.path.startsWith(prefix)) {
+      max = Math.max(max, folderPathLevel(f));
+    }
+  }
+  return max;
+}
+
+export function wouldExceedFolderNesting(
+  targetParentId: string | null,
+  all: FolderOption[],
+  subtreeRoot: FolderOption,
+): boolean {
+  let parentLevel = 0;
+  if (targetParentId !== null) {
+    const parent = all.find((f) => f.id === targetParentId);
+    if (!parent) return true;
+    parentLevel = folderPathLevel(parent);
+  }
+  const span = subtreePathLevels(subtreeRoot, all) - folderPathLevel(subtreeRoot) + 1;
+  return parentLevel + span > MAX_FOLDER_NESTING;
+}
+
+export function canCreateFolderIn(parentId: string | undefined, all: FolderOption[]): boolean {
+  if (!parentId) return true;
+  const parent = all.find((f) => f.id === parentId);
+  if (!parent) return true;
+  return folderPathLevel(parent) < MAX_FOLDER_NESTING;
+}
+
 export type SidebarDropPosition = "before" | "inside" | "after";
 
 export type SidebarDropHint =

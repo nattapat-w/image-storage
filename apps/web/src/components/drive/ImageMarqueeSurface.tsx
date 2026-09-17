@@ -10,6 +10,7 @@ import {
 import { cn } from "@/lib/utils";
 
 const MARQUEE_MIN_PX = 5;
+const MARQUEE_ARM_PX = 4;
 
 type MarqueeBox = { x1: number; y1: number; x2: number; y2: number };
 
@@ -24,7 +25,7 @@ function isMarqueeBlockedTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return true;
   return Boolean(
     target.closest(
-      "button, a, input, textarea, select, [role='menu'], [data-no-marquee], [contenteditable='true']",
+      "button, a, input, textarea, select, [role='button'], [role='menu'], [data-no-marquee], [contenteditable='true']",
     ),
   );
 }
@@ -44,7 +45,12 @@ export function ImageMarqueeSurface({
 }: ImageMarqueeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState<MarqueeBox | null>(null);
-  const activeRef = useRef<{ additive: boolean } | null>(null);
+  const activeRef = useRef<{
+    additive: boolean;
+    armed: boolean;
+    x1: number;
+    y1: number;
+  } | null>(null);
 
   const finish = useCallback(
     (current: MarqueeBox, additive: boolean) => {
@@ -75,21 +81,49 @@ export function ImageMarqueeSurface({
     if (isMarqueeBlockedTarget(e.target)) return;
     if (isSelectableDriveTarget(e.target)) return;
 
-    e.preventDefault();
     const additive = e.metaKey || e.ctrlKey;
-    activeRef.current = { additive };
+    activeRef.current = {
+      additive,
+      armed: true,
+      x1: e.clientX,
+      y1: e.clientY,
+    };
     setBox({ x1: e.clientX, y1: e.clientY, x2: e.clientX, y2: e.clientY });
-    e.currentTarget.setPointerCapture(e.pointerId);
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!activeRef.current) return;
+    const active = activeRef.current;
+    if (!active) return;
+
+    if (active.armed) {
+      const moved =
+        Math.abs(e.clientX - active.x1) >= MARQUEE_ARM_PX ||
+        Math.abs(e.clientY - active.y1) >= MARQUEE_ARM_PX;
+      if (!moved) return;
+      active.armed = false;
+      e.preventDefault();
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+
     setBox((prev) => (prev ? { ...prev, x2: e.clientX, y2: e.clientY } : null));
   };
 
   const endPointer = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!activeRef.current || !box) return;
-    const { additive } = activeRef.current;
+    const active = activeRef.current;
+    if (!active) return;
+
+    if (active.armed) {
+      activeRef.current = null;
+      setBox(null);
+      return;
+    }
+
+    if (!box) {
+      activeRef.current = null;
+      return;
+    }
+
+    const { additive } = active;
     finish(box, additive);
     activeRef.current = null;
     setBox(null);

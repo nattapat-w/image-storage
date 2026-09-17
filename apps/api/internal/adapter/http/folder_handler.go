@@ -10,10 +10,12 @@ import (
 	"image-storage/apps/api/internal/adapter/http/dto"
 	"image-storage/apps/api/internal/httpx"
 	folderuc "image-storage/apps/api/internal/usecase/folder"
+	sharefolderuc "image-storage/apps/api/internal/usecase/sharefolder"
 )
 
 type FolderHandler struct {
-	Folders *folderuc.Service
+	Folders      *folderuc.Service
+	ShareFolders *sharefolderuc.Service
 }
 
 func (h *FolderHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -101,6 +103,18 @@ func (h *FolderHandler) Breadcrumb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.WriteJSON(w, http.StatusOK, dto.BreadcrumbsFromDomain(crumbs))
+}
+
+func (h *FolderHandler) DownloadZip(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwtauth.UserIDFromContext(r.Context())
+	if h.ShareFolders == nil {
+		httpx.Error(w, http.StatusNotImplemented, "share folders unavailable")
+		return
+	}
+	if err := h.ShareFolders.StreamFolderZip(w, userID, chi.URLParam(r, "id")); err != nil {
+		WriteError(w, err)
+		return
+	}
 }
 
 func (h *FolderHandler) ListAll(w http.ResponseWriter, r *http.Request) {

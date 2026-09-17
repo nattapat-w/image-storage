@@ -116,6 +116,48 @@ CREATE TABLE IF NOT EXISTS password_reset_tokens (
   created_at TEXT NOT NULL
 )`)
 	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_password_reset_user ON password_reset_tokens(user_id)`)
+	_, _ = db.Exec(`ALTER TABLE folders ADD COLUMN is_share_folder INTEGER NOT NULL DEFAULT 0`)
+	_, _ = db.Exec(`ALTER TABLE images ADD COLUMN uploaded_by TEXT REFERENCES users(id)`)
+	_, _ = db.Exec(`UPDATE images SET uploaded_by = user_id WHERE uploaded_by IS NULL`)
+	_, _ = db.Exec(`
+CREATE TABLE IF NOT EXISTS folder_members (
+  id TEXT PRIMARY KEY,
+  folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member',
+  invited_by TEXT REFERENCES users(id),
+  joined_at TEXT NOT NULL,
+  UNIQUE(folder_id, user_id)
+)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_folder_members_user ON folder_members(user_id)`)
+	_, _ = db.Exec(`
+CREATE TABLE IF NOT EXISTS folder_invites (
+  id TEXT PRIMARY KEY,
+  folder_id TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  token TEXT NOT NULL UNIQUE,
+  invited_by TEXT NOT NULL REFERENCES users(id),
+  expires_at TEXT NOT NULL,
+  accepted_at TEXT,
+  created_at TEXT NOT NULL
+)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_folder_invites_folder ON folder_invites(folder_id)`)
+	_, _ = db.Exec(`
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT NOT NULL,
+  href TEXT NOT NULL,
+  ref_type TEXT NOT NULL,
+  ref_id TEXT NOT NULL,
+  read_at TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE(user_id, ref_type, ref_id)
+)`)
+	_, _ = db.Exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at)`)
+	_, _ = db.Exec(`ALTER TABLE shares ADD COLUMN expires_at TEXT`)
 	return nil
 }
 

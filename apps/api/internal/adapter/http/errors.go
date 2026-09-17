@@ -24,7 +24,11 @@ func WriteError(w http.ResponseWriter, err error) {
 		if errors.As(err, &inputErr) && inputErr.Message != "" {
 			msg = inputErr.Message
 		}
-		httpx.Error(w, http.StatusBadRequest, msg)
+		status := http.StatusBadRequest
+		if strings.Contains(strings.ToLower(msg), "download limit") {
+			status = http.StatusRequestEntityTooLarge
+		}
+		httpx.Error(w, status, msg)
 	case errors.Is(err, domain.ErrUnauthorized):
 		httpx.Error(w, http.StatusUnauthorized, "invalid credentials")
 	default:

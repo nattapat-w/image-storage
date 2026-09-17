@@ -49,6 +49,7 @@ type ImageRepository interface {
 	IsOwned(userID, id string) bool
 	IsInFolderTree(imageID, rootFolderID string) bool
 	ListInFolder(userID string, folderID *string) ([]domain.Image, error)
+	ListInFolderTree(userID, rootFolderID string) ([]domain.Image, error)
 }
 
 type TagRepository interface {
@@ -62,4 +63,34 @@ type ShareRepository interface {
 	Delete(userID, id string) error
 	FindByToken(token string) (domain.Share, error)
 	OwnsResource(userID, typ, id string) bool
+}
+
+type NotificationRepository interface {
+	Upsert(n domain.Notification) error
+	ListForUser(userID string, limit int) ([]domain.Notification, error)
+	MarkRead(userID, id, readAt string) error
+	MarkAllRead(userID, readAt string) error
+	MarkReadByRef(userID, refType, refID, readAt string) error
+}
+
+type ShareFolderRepository interface {
+	SetSharingEnabled(ownerID, folderID string, enabled bool, updatedAt string) error
+	IsSharingRoot(folderID string) (bool, error)
+	GetFolderOwner(folderID string) (string, error)
+	IsFolderInTree(folderID, rootID string) (bool, error)
+	ResolveShareRoot(folderID string) (rootID, ownerID string, ok bool, err error)
+
+	ListMembers(ownerID, folderID string) ([]domain.FolderMember, error)
+	AddMember(id, folderID, userID, role, invitedBy, joinedAt string) error
+	RemoveMember(folderID, userID string) error
+	IsMember(folderID, userID string) (bool, error)
+	ListSharedFoldersForUser(userID string) ([]domain.SharedFolderEntry, error)
+
+	CreateInvite(inv domain.FolderInvite) error
+	ListPendingInvites(ownerID, folderID string) ([]domain.FolderInvite, error)
+	ListPendingInvitesForEmail(email string) ([]domain.FolderInvite, error)
+	FindInviteByToken(token string) (domain.FolderInvite, error)
+	MarkInviteAccepted(inviteID, acceptedAt string) error
+	DeleteInvite(ownerID, inviteID string) error
+	ClearSharingData(folderID string) error
 }

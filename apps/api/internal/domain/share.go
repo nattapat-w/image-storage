@@ -11,6 +11,7 @@ type Share struct {
 	ResourceType string
 	ResourceID   string
 	Token        string
+	ExpiresAt    *string
 	CreatedAt    string
 }
 

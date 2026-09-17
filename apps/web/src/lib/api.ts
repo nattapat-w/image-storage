@@ -2,9 +2,16 @@ import type {
   AutoTagJob,
   Breadcrumb,
   Folder,
+  FolderInvite,
   FolderOption,
   ImageItem,
   Share,
+  ShareFolderAccess,
+  ShareFolderBrowse,
+  ShareFolderContext,
+  AppNotification,
+  IncomingShareFolderInvite,
+  SharedFolderEntry,
   ShareView,
   Tag,
   TimelineGroup,
@@ -38,6 +45,43 @@ export function apiErrorMessage(err: unknown, fallback = "Something went wrong")
   return fallback;
 }
 
+export function isUnauthorizedError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 401;
+}
+
+export function isForbiddenError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403;
+}
+
+export function isNotFoundError(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 404;
+}
+
+/** Expected for hover prefetch / stale navigation — no user-facing toast. */
+export function isSilentBrowseError(err: unknown): boolean {
+  return (
+    isUnauthorizedError(err) ||
+    isForbiddenError(err) ||
+    isNotFoundError(err)
+  );
+}
+
+/** Best-effort fetch; returns null instead of throwing (prefetch only). */
+export async function tryRequest<T>(
+  path: string,
+  options: RequestInit = {},
+  auth = true,
+): Promise<T | null> {
+  try {
+    return await request<T>(path, options, auth);
+  } catch {
+    return null;
+  }
+}
+
+/** Fired when an authenticated API call returns 401 (session cleared). */
+export const AUTH_SESSION_EXPIRED = "auth:session-expired";
+
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -60,6 +104,13 @@ async function request<T>(
       }
     } catch {
       /* ignore */
+    }
+    if (res.status === 401 && auth) {
+      setToken(null);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED));
+      }
+      msg = "Session expired — please sign in again.";
     }
     throw new ApiError(res.status, msg, body);
   }
@@ -221,6 +272,13 @@ export const api = {
       body: JSON.stringify(data),
     });
   },
+  copyImage(id: string, folderId: string) {
+    return request<ImageItem>(`/api/images/${id}/copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId }),
+    });
+  },
   deleteImage(id: string) {
     return request<void>(`/api/images/${id}`, { method: "DELETE" });
   },
@@ -255,11 +313,20 @@ export const api = {
   imageViewPath(id: string) {
     return `/image/${id}`;
   },
-  createShare(resourceType: "image" | "folder", resourceId: string) {
+  createShare(
+    resourceType: "image" | "folder",
+    resourceId: string,
+    expiresAt?: string | null,
+  ) {
+    const body: { resourceType: string; resourceId: string; expiresAt?: string } = {
+      resourceType,
+      resourceId,
+    };
+    if (expiresAt) body.expiresAt = expiresAt;
     return request<Share>("/api/shares", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resourceType, resourceId }),
+      body: JSON.stringify(body),
     });
   },
   listShares(resourceType: string, resourceId: string) {
@@ -272,6 +339,126 @@ export const api = {
   },
   viewShare(token: string) {
     return request<ShareView>(`/api/share/${token}`, {}, false);
+  },
+  enableShareFolder(folderId: string) {
+    return request<Folder>(`/api/folders/${folderId}/sharing`, { method: "POST" });
+  },
+  disableShareFolder(folderId: string) {
+    return request<void>(`/api/folders/${folderId}/sharing`, { method: "DELETE" });
+  },
+  getShareFolderAccess(folderId: string) {
+    return request<ShareFolderAccess>(`/api/folders/${folderId}/members`);
+  },
+  inviteShareFolderMember(folderId: string, email: string) {
+    return request<FolderInvite>(`/api/folders/${folderId}/members`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
+  },
+  removeShareFolderMember(folderId: string, userId: string) {
+    return request<void>(`/api/folders/${folderId}/members/${userId}`, { method: "DELETE" });
+  },
+  previewShareFolderInvite(token: string) {
+    return request<{ invite: FolderInvite; folder: Folder }>(
+      `/api/share-folder/invites/${token}`,
+      {},
+      false,
+    );
+  },
+  acceptShareFolderInvite(token: string) {
+    return request<SharedFolderEntry>(`/api/share-folder/invites/${token}/accept`, {
+      method: "POST",
+    });
+  },
+  resolveShareFolderContext(folderId: string) {
+    return request<ShareFolderContext>(
+      `/api/share-folder/context?folderId=${encodeURIComponent(folderId)}`,
+    );
+  },
+  listSharedFolders() {
+    return request<SharedFolderEntry[]>("/api/share-folder/folders");
+  },
+  listIncomingShareFolderInvites() {
+    return request<IncomingShareFolderInvite[]>("/api/share-folder/my-invites");
+  },
+  listNotifications() {
+    return request<AppNotification[]>("/api/notifications");
+  },
+  markNotificationRead(id: string) {
+    return request<void>(`/api/notifications/${id}/read`, { method: "POST" });
+  },
+  markAllNotificationsRead() {
+    return request<void>("/api/notifications/read-all", { method: "POST" });
+  },
+  listShareFolderTree(rootId: string) {
+    return request<FolderOption[]>(`/api/share-folder/folders/${rootId}/all`);
+  },
+  shareFolderBreadcrumb(rootId: string, folderId?: string) {
+    const q = folderId ? `?folderId=${encodeURIComponent(folderId)}` : "";
+    return request<Breadcrumb[]>(`/api/share-folder/folders/${rootId}/breadcrumb${q}`);
+  },
+  browseSharedFolder(rootId: string, parentId?: string) {
+    const q = parentId ? `?parentId=${encodeURIComponent(parentId)}` : "";
+    return request<ShareFolderBrowse>(`/api/share-folder/folders/${rootId}/browse${q}`);
+  },
+  uploadShareFolderImage(rootId: string, file: File, folderId?: string) {
+    const form = new FormData();
+    form.append("file", file);
+    if (folderId) form.append("folderId", folderId);
+    return request<ImageItem>(`/api/share-folder/folders/${rootId}/images`, {
+      method: "POST",
+      body: form,
+    });
+  },
+  createShareFolderSubfolder(rootId: string, name: string, parentId?: string) {
+    return request<Folder>(`/api/share-folder/folders/${rootId}/folders`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, parentId: parentId ?? "" }),
+    });
+  },
+  deleteShareFolderImage(imageId: string) {
+    return request<void>(`/api/share-folder/images/${imageId}`, { method: "DELETE" });
+  },
+  copyShareFolderImage(imageId: string, folderId: string) {
+    return request<ImageItem>(`/api/share-folder/images/${imageId}/copy`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folderId }),
+    });
+  },
+  shareFolderImageFileUrl(imageId: string) {
+    return `/api/share-folder/images/${imageId}/file`;
+  },
+  async downloadShareFolderZip(folderId: string) {
+    const token = getToken();
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const res = await fetch(`/api/folders/${folderId}/download`, { headers });
+    if (!res.ok) {
+      let msg = res.statusText;
+      try {
+        const body = await res.json();
+        if (typeof body === "object" && body && "error" in body) {
+          const err = body as { error: string; message?: string };
+          msg = err.message ?? err.error;
+        }
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, msg);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const match = /filename="([^"]+)"/i.exec(disposition);
+    const filename = match?.[1] ?? "folder.zip";
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
   },
 };
 

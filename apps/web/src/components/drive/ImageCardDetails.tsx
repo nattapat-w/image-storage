@@ -50,12 +50,11 @@ export function ImageCardDetails({
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            e.preventDefault();
-            onOpenPreview();
           }}
           onDoubleClick={(e) => {
             e.stopPropagation();
-            onRename?.();
+            e.preventDefault();
+            onOpenPreview();
           }}
           className={cn(
             DRIVE_OPEN_SURFACE,

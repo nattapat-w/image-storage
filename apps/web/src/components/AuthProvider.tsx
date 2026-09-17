@@ -9,13 +9,25 @@ import {
   useState,
 } from "react";
 import { useRouter } from "next/navigation";
-import { api, clearRememberedLogin, getToken, setLastEmail, setToken } from "@/lib/api";
+import {
+  api,
+  AUTH_SESSION_EXPIRED,
+  clearRememberedLogin,
+  getToken,
+  setLastEmail,
+  setToken,
+} from "@/lib/api";
 import type { User } from "@/lib/types";
 
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
-  login: (email: string, password: string, remember?: boolean) => Promise<void>;
+  login: (
+    email: string,
+    password: string,
+    remember?: boolean,
+    redirectTo?: string,
+  ) => Promise<void>;
   register: (email: string, password: string) => Promise<void>;
   logout: () => void;
   refreshUser: () => Promise<void>;
@@ -40,18 +52,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const token = getToken();
     if (!token) {
+      setUser(null);
       setLoading(false);
       return;
     }
     api
       .me()
       .then(setUser)
-      .catch(() => setToken(null))
+      .catch(() => {
+        setToken(null);
+        setUser(null);
+      })
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    const onExpired = () => {
+      setUser(null);
+      const next =
+        typeof window !== "undefined"
+          ? `${window.location.pathname}${window.location.search}`
+          : "";
+      const q =
+        next && next.startsWith("/") && !next.startsWith("/login")
+          ? `?next=${encodeURIComponent(next)}`
+          : "";
+      router.replace(`/login${q}`);
+    };
+    window.addEventListener(AUTH_SESSION_EXPIRED, onExpired);
+    return () => window.removeEventListener(AUTH_SESSION_EXPIRED, onExpired);
+  }, [router]);
+
   const login = useCallback(
-    async (email: string, password: string, remember = true) => {
+    async (email: string, password: string, remember = true, redirectTo = "/dashboard") => {
       const res = await api.login(email, password, remember);
       if (remember) {
         setLastEmail(email);
@@ -59,7 +92,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearRememberedLogin();
       }
       setUser(res.user);
-      router.push("/dashboard");
+      const safe =
+        redirectTo.startsWith("/") && !redirectTo.startsWith("//") ? redirectTo : "/dashboard";
+      router.push(safe);
     },
     [router],
   );

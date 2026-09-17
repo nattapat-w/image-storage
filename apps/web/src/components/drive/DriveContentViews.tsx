@@ -14,6 +14,7 @@ import {
   type ViewMode,
 } from "@/components/drive/constants";
 import { writeImageDragData } from "@/components/drive/image-drag";
+import { handleImageDoubleClick, handleImagePrimaryClick } from "@/components/drive/image-open";
 import { DRIVE_FOLDER_SELECT_ATTR, DRIVE_IMAGE_SELECT_ATTR } from "@/components/drive/marquee-select";
 import { ImageCardDetails } from "@/components/drive/ImageCardDetails";
 import { formatDriveDate } from "@/components/drive/drive-format";
@@ -50,7 +51,8 @@ export type DriveContentViewProps = {
   ImageMenu: React.ComponentType<{ img: ImageItem }>;
   FolderMenu: React.ComponentType<{ folder: FolderType }>;
   VisibilityBadge: React.ComponentType<{ visibility: string }>;
-  ownerLabel: string;
+  folderOwnerLabel: string;
+  posterLabelFor: (img: ImageItem) => string;
   showFavoriteStar: boolean;
   onToggleFavorite: (img: ImageItem) => void;
   isImageTagging?: (id: string) => boolean;
@@ -94,7 +96,8 @@ export function GridView({
   FolderMenu,
   VisibilityBadge,
   showFavoriteStar,
-  ownerLabel,
+  folderOwnerLabel,
+  posterLabelFor,
   onToggleFavorite,
   isImageTagging,
   getTaggingElapsed,
@@ -151,11 +154,10 @@ export function GridView({
               <div
                 role="button"
                 tabIndex={0}
-                onClick={(e) => onImageSelectClick(e, img)}
-                onDoubleClick={(e) => {
-                  e.preventDefault();
-                  openPreview(img);
-                }}
+                onClick={(e) =>
+                  handleImagePrimaryClick(e, img, onImageSelectClick, openPreview)
+                }
+                onDoubleClick={(e) => handleImageDoubleClick(e, img, openPreview)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -177,7 +179,7 @@ export function GridView({
                 <div className="mt-2 min-w-0">
                   <ImageCardDetails
                     img={img}
-                    ownerLabel={ownerLabel}
+                    ownerLabel={posterLabelFor(img)}
                     VisibilityBadge={VisibilityBadge}
                     compact
                     isTagging={isImageTagging?.(img.id)}
@@ -248,7 +250,7 @@ export function ListView(p: DriveContentViewProps) {
                 </div>
               </td>
               <td className="hidden px-3 py-2 text-[var(--muted-foreground)] md:table-cell">
-                {p.ownerLabel}
+                {p.folderOwnerLabel}
               </td>
               <td className="hidden px-3 py-2 text-[var(--muted-foreground)] lg:table-cell">
                 {formatDriveDate(f.updatedAt)}
@@ -280,11 +282,10 @@ export function ListView(p: DriveContentViewProps) {
               <td className="px-3 py-2">
                 <div
                   className={cn(DRIVE_SELECT_SURFACE, "flex min-w-0 items-center gap-3")}
-                  onClick={(e) => p.onImageSelectClick(e, img)}
-                  onDoubleClick={(e) => {
-                    e.preventDefault();
-                    p.openPreview(img);
-                  }}
+                  onClick={(e) =>
+                    handleImagePrimaryClick(e, img, p.onImageSelectClick, p.openPreview)
+                  }
+                  onDoubleClick={(e) => handleImageDoubleClick(e, img, p.openPreview)}
                 >
                   <ImageThumbWithFavorite
                     img={img}
@@ -298,17 +299,17 @@ export function ListView(p: DriveContentViewProps) {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      p.openPreview(img);
                     }}
                     onDoubleClick={(e) => {
                       e.stopPropagation();
+                      e.preventDefault();
                       p.askRenameImage(img);
                     }}
                     className={cn(
                       DRIVE_OPEN_SURFACE,
                       "w-fit max-w-full min-w-0 text-left hover:underline",
                     )}
-                    title="Click to preview · Double-click to rename"
+                    title="Double-click to rename"
                   >
                     <span className="block max-w-full truncate">
                       {imageFileLabel(img.name, img.mimeType)}
@@ -317,7 +318,7 @@ export function ListView(p: DriveContentViewProps) {
                 </div>
               </td>
               <td className="hidden px-3 py-2 text-[var(--muted-foreground)] md:table-cell">
-                {p.ownerLabel}
+                {p.posterLabelFor(img)}
               </td>
               <td className="hidden px-3 py-2 text-[var(--muted-foreground)] lg:table-cell">
                 {formatDriveDate(img.createdAt)}
@@ -388,11 +389,10 @@ export function DetailView(p: DriveContentViewProps) {
               <div
                 role="button"
                 tabIndex={0}
-                onClick={(e) => p.onImageSelectClick(e, img)}
-                onDoubleClick={(e) => {
-                  e.preventDefault();
-                  p.openPreview(img);
-                }}
+                onClick={(e) =>
+                  handleImagePrimaryClick(e, img, p.onImageSelectClick, p.openPreview)
+                }
+                onDoubleClick={(e) => handleImageDoubleClick(e, img, p.openPreview)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -416,7 +416,7 @@ export function DetailView(p: DriveContentViewProps) {
               >
                 <ImageCardDetails
                   img={img}
-                  ownerLabel={p.ownerLabel}
+                  ownerLabel={p.posterLabelFor(img)}
                   VisibilityBadge={p.VisibilityBadge}
                   isTagging={p.isImageTagging?.(img.id)}
                   taggingElapsedSec={p.getTaggingElapsed?.(img.id)}

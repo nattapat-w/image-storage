@@ -17,6 +17,8 @@ type Repositories struct {
 	Images        port.ImageRepository
 	Tags          port.TagRepository
 	Shares        port.ShareRepository
+	ShareFolders    port.ShareFolderRepository
+	Notifications   port.NotificationRepository
 }
 
 func Open(cfg config.Config) (*sql.DB, *Repositories, string, error) {
@@ -33,6 +35,8 @@ func Open(cfg config.Config) (*sql.DB, *Repositories, string, error) {
 			Images:        repos.Images,
 			Tags:          repos.Tags,
 			Shares:        repos.Shares,
+			ShareFolders:    repos.ShareFolders,
+			Notifications:   repos.Notifications,
 		}, "postgres", nil
 	}
 
@@ -48,5 +52,7 @@ func Open(cfg config.Config) (*sql.DB, *Repositories, string, error) {
 		Images:        repos.Images,
 		Tags:          repos.Tags,
 		Shares:        repos.Shares,
+		ShareFolders:    repos.ShareFolders,
+		Notifications:   repos.Notifications,
 	}, fmt.Sprintf("sqlite (%s)", cfg.DatabasePath), nil
 }

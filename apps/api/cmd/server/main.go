@@ -23,6 +23,8 @@ import (
 	folderuc "image-storage/apps/api/internal/usecase/folder"
 	imageuc "image-storage/apps/api/internal/usecase/image"
 	shareuc "image-storage/apps/api/internal/usecase/share"
+	notificationuc "image-storage/apps/api/internal/usecase/notification"
+	sharefolderuc "image-storage/apps/api/internal/usecase/sharefolder"
 	taguc "image-storage/apps/api/internal/usecase/tag"
 )
 
@@ -79,6 +81,19 @@ func main() {
 			cfg.Classifier.OllamaURL, cfg.Classifier.OllamaModel, cfg.Classifier.AutoTagOnUpload)
 	}
 
+	imageSvc := &imageuc.Service{
+		Images: repos.Images, Folders: repos.Folders,
+		Store: blobStore, CDN: cdnSvc, Meta: metaSvc, MaxUpload: cfg.MaxUploadBytes,
+	}
+
+	notificationSvc := &notificationuc.Service{
+		Notifications: repos.Notifications,
+		ShareFolders:  repos.ShareFolders,
+		Folders:       repos.Folders,
+		Users:         repos.Users,
+		FrontendURL:   cfg.FrontendURL,
+	}
+
 	handler := httpadapter.NewRouter(httpadapter.Services{
 		Auth: &authuc.Service{
 			Users:         repos.Users,
@@ -88,15 +103,17 @@ func main() {
 			FrontendURL:   cfg.FrontendURL,
 		},
 		Folders: &folderuc.Service{Folders: repos.Folders},
-		Images: &imageuc.Service{
-			Images: repos.Images, Folders: repos.Folders,
-			Store: blobStore, CDN: cdnSvc, Meta: metaSvc, MaxUpload: cfg.MaxUploadBytes,
-		},
+		Images:  imageSvc,
 		Tags:    tagSvc,
 		AutoTag: autoTagSvc,
 		Shares: &shareuc.Service{
 			Shares: repos.Shares, Images: repos.Images, Folders: repos.Folders, Store: blobStore,
 		},
+		ShareFolders: &sharefolderuc.Service{
+			ShareFolders: repos.ShareFolders, Folders: repos.Folders,
+			Images: repos.Images, ImageUC: imageSvc, Users: repos.Users, FrontendURL: cfg.FrontendURL,
+		},
+		Notifications:  notificationSvc,
 		JWT:            jwtSvc,
 		EnableDevTools: cfg.EnableDevTools,
 	})

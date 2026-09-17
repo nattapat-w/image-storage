@@ -15,12 +15,12 @@ func (r *FolderRepo) ListChildren(userID string, parentID *string) ([]domain.Fol
 	var err error
 	if parentID == nil {
 		rows, err = r.store.DB.Query(
-			`SELECT id, parent_id, name, created_at, updated_at FROM folders WHERE user_id = ? AND parent_id IS NULL ORDER BY name`,
+			`SELECT id, parent_id, name, is_share_folder, created_at, updated_at FROM folders WHERE user_id = ? AND parent_id IS NULL ORDER BY name`,
 			userID,
 		)
 	} else {
 		rows, err = r.store.DB.Query(
-			`SELECT id, parent_id, name, created_at, updated_at FROM folders WHERE user_id = ? AND parent_id = ? ORDER BY name`,
+			`SELECT id, parent_id, name, is_share_folder, created_at, updated_at FROM folders WHERE user_id = ? AND parent_id = ? ORDER BY name`,
 			userID, *parentID,
 		)
 	}
@@ -59,7 +59,7 @@ func (r *FolderRepo) Create(userID string, folder domain.Folder) error {
 
 func (r *FolderRepo) Get(userID, id string) (domain.Folder, error) {
 	row := r.store.DB.QueryRow(
-		`SELECT id, parent_id, name, created_at, updated_at FROM folders WHERE id = ? AND user_id = ?`,
+		`SELECT id, parent_id, name, is_share_folder, created_at, updated_at FROM folders WHERE id = ? AND user_id = ?`,
 		id, userID,
 	)
 	f, err := scanFolderRow(row)
@@ -185,7 +185,7 @@ func (r *FolderRepo) Breadcrumb(userID, folderID string) ([]domain.Breadcrumb, e
 
 func (r *FolderRepo) ListRows(userID string) ([]domain.FolderRow, error) {
 	rows, err := r.store.DB.Query(
-		`SELECT id, parent_id, name FROM folders WHERE user_id = ? ORDER BY name`,
+		`SELECT id, parent_id, name, is_share_folder FROM folders WHERE user_id = ? ORDER BY name`,
 		userID,
 	)
 	if err != nil {
@@ -196,12 +196,14 @@ func (r *FolderRepo) ListRows(userID string) ([]domain.FolderRow, error) {
 	for rows.Next() {
 		var row domain.FolderRow
 		var parent sql.NullString
-		if err := rows.Scan(&row.ID, &parent, &row.Name); err != nil {
+		var isShare int
+		if err := rows.Scan(&row.ID, &parent, &row.Name, &isShare); err != nil {
 			return nil, err
 		}
 		if parent.Valid {
 			row.ParentID = &parent.String
 		}
+		row.IsShareFolder = isShare != 0
 		out = append(out, row)
 	}
 	return out, rows.Err()
@@ -281,11 +283,13 @@ type folderScanner interface {
 func scanFolderRow(row folderScanner) (domain.Folder, error) {
 	var f domain.Folder
 	var parent sql.NullString
-	if err := row.Scan(&f.ID, &parent, &f.Name, &f.CreatedAt, &f.UpdatedAt); err != nil {
+	var isShare int
+	if err := row.Scan(&f.ID, &parent, &f.Name, &isShare, &f.CreatedAt, &f.UpdatedAt); err != nil {
 		return f, err
 	}
 	if parent.Valid {
 		f.ParentID = &parent.String
 	}
+	f.IsShareFolder = isShare != 0
 	return f, nil
 }

@@ -11,9 +11,10 @@ type DriveImageThumbProps = {
   img: ImageItem;
   className?: string;
   shareToken?: string;
+  shareFolder?: boolean;
 };
 
-function DriveImageThumbComponent({ img, className, shareToken }: DriveImageThumbProps) {
+function DriveImageThumbComponent({ img, className, shareToken, shareFolder }: DriveImageThumbProps) {
   if (img.visibility === "public" && !shareToken) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
@@ -25,9 +26,13 @@ function DriveImageThumbComponent({ img, className, shareToken }: DriveImageThum
     );
   }
 
+  const src = shareFolder
+    ? api.shareFolderImageFileUrl(img.id)
+    : api.imageFileUrl(img.id, shareToken);
+
   return (
     <AuthImage
-      src={api.imageFileUrl(img.id, shareToken)}
+      src={src}
       alt={displayImageName(img.name, img.mimeType)}
       className={cn("rounded-[4px] object-cover", className)}
     />
@@ -40,5 +45,6 @@ export const DriveImageThumb = memo(
     prev.img.id === next.img.id &&
     prev.img.visibility === next.img.visibility &&
     prev.shareToken === next.shareToken &&
+    prev.shareFolder === next.shareFolder &&
     prev.className === next.className,
 );

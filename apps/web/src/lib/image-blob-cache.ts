@@ -1,4 +1,5 @@
-import { getToken } from "./auth-storage";
+import { AUTH_SESSION_EXPIRED } from "./api";
+import { getToken, setToken } from "./auth-storage";
 
 const cache = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
@@ -34,6 +35,12 @@ export async function fetchImageBlobUrl(src: string): Promise<string> {
 
   const promise = fetch(src, { headers })
     .then(async (r) => {
+      if (r.status === 401 && token) {
+        setToken(null);
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event(AUTH_SESSION_EXPIRED));
+        }
+      }
       if (!r.ok) throw new Error("load failed");
       const buf = await r.arrayBuffer();
       const headerType = r.headers.get("Content-Type")?.split(";")[0]?.trim();

@@ -3,6 +3,7 @@
 import { FolderOpen } from "lucide-react";
 import { folderStatsLabel } from "@/components/drive/drive-format";
 import { DRIVE_OPEN_SURFACE, DRIVE_SELECT_SURFACE } from "@/components/drive/constants";
+import { DriveShareFolderBadge } from "@/components/drive/DriveShareFolderBadge";
 import { DRIVE_FOLDER_SELECT_ATTR } from "@/components/drive/marquee-select";
 import type { Folder as FolderType } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -95,21 +96,24 @@ export function FolderPill({
           <FolderOpen className="size-[18px] text-[#f0b232]" />
         </div>
         <div className="min-w-0 flex-1 py-0.5">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              e.preventDefault();
-              onOpen();
-            }}
-            className={cn(
-              DRIVE_OPEN_SURFACE,
-              "w-fit max-w-full min-w-0 truncate text-left text-[13px] leading-5 font-medium text-[var(--header-primary)] hover:underline",
-            )}
-            title="Click to open folder"
-          >
-            {folder.name}
-          </button>
+          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                onOpen();
+              }}
+              className={cn(
+                DRIVE_OPEN_SURFACE,
+                "max-w-full min-w-0 truncate text-left text-[13px] leading-5 font-medium text-[var(--header-primary)] hover:underline",
+              )}
+              title="Click to open folder"
+            >
+              {folder.name}
+            </button>
+            {folder.isShareFolder ? <DriveShareFolderBadge /> : null}
+          </div>
           <span className="mt-0.5 block truncate text-[10px] leading-4 text-[var(--muted-foreground)]">
             {stats}
           </span>

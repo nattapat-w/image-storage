@@ -7,15 +7,16 @@ import (
 	"image-storage/apps/api/internal/domain"
 )
 
-const imageSelectCols = `id, folder_id, name, mime_type, size, visibility, favorite, content_hash, taken_at, deleted_at, created_at, updated_at`
+const imageSelectCols = `id, folder_id, name, mime_type, size, visibility, favorite, content_hash, taken_at, deleted_at, uploaded_by, created_at, updated_at`
 
 func scanImageRows(rows *sql.Rows) (domain.Image, error) {
 	var img domain.Image
 	var folder, contentHash, takenAt, deletedAt sql.NullString
 	var favorite int
+	var uploadedBy sql.NullString
 	err := rows.Scan(
 		&img.ID, &folder, &img.Name, &img.MimeType, &img.Size, &img.Visibility,
-		&favorite, &contentHash, &takenAt, &deletedAt, &img.CreatedAt, &img.UpdatedAt,
+		&favorite, &contentHash, &takenAt, &deletedAt, &uploadedBy, &img.CreatedAt, &img.UpdatedAt,
 	)
 	if err != nil {
 		return img, err
@@ -32,6 +33,9 @@ func scanImageRows(rows *sql.Rows) (domain.Image, error) {
 	}
 	if deletedAt.Valid {
 		img.DeletedAt = &deletedAt.String
+	}
+	if uploadedBy.Valid {
+		img.UploadedBy = uploadedBy.String
 	}
 	img.Tags = []string{}
 	return img, nil
@@ -41,9 +45,10 @@ func scanImageRow(row *sql.Row) (domain.Image, error) {
 	var img domain.Image
 	var folder, contentHash, takenAt, deletedAt sql.NullString
 	var favorite int
+	var uploadedBy sql.NullString
 	err := row.Scan(
 		&img.ID, &folder, &img.Name, &img.MimeType, &img.Size, &img.Visibility,
-		&favorite, &contentHash, &takenAt, &deletedAt, &img.CreatedAt, &img.UpdatedAt,
+		&favorite, &contentHash, &takenAt, &deletedAt, &uploadedBy, &img.CreatedAt, &img.UpdatedAt,
 	)
 	if err != nil {
 		return img, err
@@ -60,6 +65,9 @@ func scanImageRow(row *sql.Row) (domain.Image, error) {
 	}
 	if deletedAt.Valid {
 		img.DeletedAt = &deletedAt.String
+	}
+	if uploadedBy.Valid {
+		img.UploadedBy = uploadedBy.String
 	}
 	img.Tags = []string{}
 	return img, nil

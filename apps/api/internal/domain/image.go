@@ -23,6 +23,7 @@ type Image struct {
 	ContentHash string
 	TakenAt     *string
 	DeletedAt   *string
+	UploadedBy  string
 	Tags        []string
 	CreatedAt   string
 	UpdatedAt   string

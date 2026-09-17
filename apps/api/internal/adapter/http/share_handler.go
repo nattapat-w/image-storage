@@ -24,14 +24,15 @@ type ShareHandler struct {
 func (h *ShareHandler) Create(w http.ResponseWriter, r *http.Request) {
 	userID, _ := jwtauth.UserIDFromContext(r.Context())
 	var body struct {
-		ResourceType string `json:"resourceType"`
-		ResourceID   string `json:"resourceId"`
+		ResourceType string  `json:"resourceType"`
+		ResourceID   string  `json:"resourceId"`
+		ExpiresAt    *string `json:"expiresAt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		httpx.Error(w, http.StatusBadRequest, "invalid json")
 		return
 	}
-	share, err := h.Shares.Create(userID, body.ResourceType, body.ResourceID)
+	share, err := h.Shares.Create(userID, body.ResourceType, body.ResourceID, body.ExpiresAt)
 	if err != nil {
 		WriteError(w, err)
 		return

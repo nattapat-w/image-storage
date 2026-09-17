@@ -1,6 +1,7 @@
 import { DRAG_TYPE } from "@/components/drive/constants";
 
 export const IMAGES_DRAG_TYPE = "application/x-image-storage-images";
+export const IMAGE_COPY_DRAG_TYPE = "application/x-image-storage-copy";
 
 export function writeImageDragData(
   e: React.DragEvent,
@@ -9,10 +10,16 @@ export function writeImageDragData(
 ) {
   const ids =
     selectedIds.has(primaryId) && selectedIds.size > 1 ? Array.from(selectedIds) : [primaryId];
+  const copy = e.altKey;
   e.dataTransfer.setData(DRAG_TYPE, ids[0]);
   e.dataTransfer.setData(IMAGES_DRAG_TYPE, JSON.stringify(ids));
+  e.dataTransfer.setData(IMAGE_COPY_DRAG_TYPE, copy ? "1" : "0");
   e.dataTransfer.setData("text/plain", ids.join(","));
-  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.effectAllowed = copy ? "copy" : "move";
+}
+
+export function isImageCopyDrag(e: React.DragEvent): boolean {
+  return e.dataTransfer.getData(IMAGE_COPY_DRAG_TYPE) === "1";
 }
 
 export function readImageDragIds(e: React.DragEvent): string[] {

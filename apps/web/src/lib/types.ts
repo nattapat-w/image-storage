@@ -10,10 +10,69 @@ export type Folder = {
   id: string;
   parentId: string | null;
   name: string;
+  isShareFolder?: boolean;
   imageCount: number;
   totalSize: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type FolderMember = {
+  id: string;
+  userId: string;
+  email: string;
+  displayName: string;
+  role: string;
+  joinedAt: string;
+};
+
+export type FolderInvite = {
+  id: string;
+  folderId: string;
+  email: string;
+  inviteUrl: string;
+  expiresAt: string;
+  createdAt: string;
+  accepted: boolean;
+};
+
+export type SharedFolderEntry = {
+  folder: Folder;
+  ownerId: string;
+  ownerEmail?: string;
+  role: string;
+};
+
+export type ShareFolderAccess = {
+  members: FolderMember[];
+  invites: FolderInvite[];
+};
+
+export type ShareFolderBrowse = {
+  rootId: string;
+  ownerId: string;
+  folders: Folder[];
+  images: ImageItem[];
+};
+
+export type ShareFolderContext =
+  | { active: false }
+  | { active: true; rootId: string; ownerId: string; role: string };
+
+export type IncomingShareFolderInvite = {
+  invite: FolderInvite;
+  folder: Folder;
+  ownerEmail?: string;
+};
+
+export type AppNotification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  href: string;
+  read: boolean;
+  createdAt: string;
 };
 
 export type AutoTagJob = {
@@ -36,6 +95,8 @@ export type ImageItem = {
   takenAt: string | null;
   deletedAt?: string | null;
   tags: string[];
+  uploadedBy?: string;
+  uploadedByDisplayName?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -58,6 +119,7 @@ export type FolderOption = {
   path: string;
   imageCount: number;
   totalSize: number;
+  isShareFolder?: boolean;
 };
 
 export type Share = {
@@ -66,6 +128,7 @@ export type Share = {
   resourceId: string;
   token: string;
   url: string;
+  expiresAt?: string | null;
   createdAt: string;
 };
 

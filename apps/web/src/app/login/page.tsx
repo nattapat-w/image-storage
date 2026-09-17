@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
 import { AuthShell } from "@/components/auth/AuthShell";
 import { PasswordInput } from "@/components/PasswordInput";
@@ -15,7 +16,9 @@ import { Label } from "@/components/ui/label";
 
 export default function LoginPage() {
   const { login } = useAuth();
-  const { loading } = useRedirectIfAuthed();
+  const searchParams = useSearchParams();
+  const nextPath = searchParams.get("next");
+  const { loading } = useRedirectIfAuthed(nextPath && nextPath.startsWith("/") ? nextPath : "/dashboard");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -36,7 +39,11 @@ export default function LoginPage() {
     setError("");
     setSubmitting(true);
     try {
-      await login(email, password, remember);
+      const next =
+        nextPath && nextPath.startsWith("/") && !nextPath.startsWith("//")
+          ? nextPath
+          : undefined;
+      await login(email, password, remember, next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {

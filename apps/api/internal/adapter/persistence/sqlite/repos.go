@@ -9,6 +9,8 @@ type Repositories struct {
 	Images        *ImageRepo
 	Tags          *TagRepo
 	Shares        *ShareRepo
+	ShareFolders    *ShareFolderRepo
+	Notifications   *NotificationRepo
 }
 
 func NewRepositories(db *sql.DB) *Repositories {
@@ -20,5 +22,7 @@ func NewRepositories(db *sql.DB) *Repositories {
 		Images:        &ImageRepo{store: store},
 		Tags:          &TagRepo{store: store},
 		Shares:        &ShareRepo{store: store},
+		ShareFolders:  &ShareFolderRepo{store: store},
+		Notifications: &NotificationRepo{store: store},
 	}
 }

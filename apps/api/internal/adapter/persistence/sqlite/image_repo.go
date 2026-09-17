@@ -153,10 +153,14 @@ func (r *ImageRepo) Insert(userID string, img domain.Image, storageKey string) e
 	if img.Favorite {
 		fav = 1
 	}
+	uploadedBy := img.UploadedBy
+	if uploadedBy == "" {
+		uploadedBy = userID
+	}
 	_, err := r.store.DB.Exec(
-		`INSERT INTO images (id, user_id, folder_id, name, mime_type, size, storage_key, visibility, favorite, content_hash, taken_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO images (id, user_id, folder_id, name, mime_type, size, storage_key, visibility, favorite, content_hash, taken_at, uploaded_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		img.ID, userID, folder, img.Name, img.MimeType, img.Size, storageKey,
-		img.Visibility, fav, img.ContentHash, img.TakenAt, img.CreatedAt, img.UpdatedAt,
+		img.Visibility, fav, img.ContentHash, img.TakenAt, uploadedBy, img.CreatedAt, img.UpdatedAt,
 	)
 	return err
 }
@@ -362,6 +366,34 @@ func (r *ImageRepo) IsInFolderTree(imageID, rootFolderID string) bool {
 		}
 		current = parent.String
 	}
+}
+
+func (r *ImageRepo) ListInFolderTree(userID, rootFolderID string) ([]domain.Image, error) {
+	rows, err := r.store.DB.Query(`
+WITH RECURSIVE tree(id) AS (
+  SELECT ?
+  UNION ALL
+  SELECT f.id FROM folders f INNER JOIN tree t ON f.parent_id = t.id
+)
+SELECT `+imageSelectCols+` FROM images i
+WHERE i.user_id = ? AND i.deleted_at IS NULL AND i.folder_id IN (SELECT id FROM tree)
+ORDER BY i.name`, rootFolderID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []domain.Image{}
+	for rows.Next() {
+		img, err := scanImageRows(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, img)
+	}
+	if err := attachTags(r.store.DB, out); err != nil {
+		return nil, err
+	}
+	return out, rows.Err()
 }
 
 func (r *ImageRepo) ListInFolder(userID string, folderID *string) ([]domain.Image, error) {

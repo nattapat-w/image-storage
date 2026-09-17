@@ -3,6 +3,7 @@ package imageuc
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -91,13 +92,91 @@ func (s *Service) Upload(userID string, folderID string, filename string, mime s
 	img := domain.Image{
 		ID: id, FolderID: folderPtr, Name: safeName, MimeType: mime, Size: int64(len(data)),
 		Visibility: domain.VisibilityPrivate, ContentHash: hash, TakenAt: s.Meta.TakenAt(data),
-		CreatedAt: now, UpdatedAt: now,
+		UploadedBy: userID, CreatedAt: now, UpdatedAt: now,
 	}
 	if err := s.Images.Insert(userID, img, key); err != nil {
 		_ = s.Store.Delete(key)
 		return domain.Image{}, fmt.Errorf("save metadata: %w", err)
 	}
 	return s.Images.GetOwned(userID, id)
+}
+
+// UploadAsOwner stores the blob under ownerUserID (drive owner). uploadedByUserID is recorded on the row.
+func (s *Service) UploadAsOwner(ownerUserID, uploadedByUserID, folderID string, filename string, mime string, data []byte) (domain.Image, error) {
+	if int64(len(data)) > s.MaxUpload {
+		return domain.Image{}, &domain.InputError{
+			Message: fmt.Sprintf("file exceeds maximum upload size (%s)", formatUploadLimit(s.MaxUpload)),
+		}
+	}
+	mime = normalizeImageMIME(mime)
+	if mime == "" || !domain.AllowedMimes[mime] {
+		mime = normalizeImageMIME(http.DetectContentType(data))
+	}
+	if !domain.AllowedMimes[mime] {
+		return domain.Image{}, &domain.InputError{
+			Message: fmt.Sprintf("unsupported image type (%s); use JPEG, PNG, GIF, or WebP", mime),
+		}
+	}
+	if folderID != "" && !s.Folders.Owns(ownerUserID, folderID) {
+		return domain.Image{}, &domain.InputError{Message: "folder not found"}
+	}
+	hash := s.Meta.Hash(data)
+	id := uuid.NewString()
+	safeName := sanitizeUploadFilename(filename)
+	if safeName == "" {
+		safeName = id + extForMime(mime)
+	}
+	var folderPtr *string
+	if folderID != "" {
+		folderPtr = &folderID
+	}
+	inFolder, err := s.Images.ListInFolder(ownerUserID, folderPtr)
+	if err != nil {
+		return domain.Image{}, err
+	}
+	safeName = uniqueImageName(safeName, nameSetFromImages(inFolder))
+	key := s.Store.Key(ownerUserID, id, safeName)
+	if err := s.Store.Save(key, bytes.NewReader(data)); err != nil {
+		return domain.Image{}, fmt.Errorf("save file: %w", err)
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	uploader := uploadedByUserID
+	if uploader == "" {
+		uploader = ownerUserID
+	}
+	img := domain.Image{
+		ID: id, FolderID: folderPtr, Name: safeName, MimeType: mime, Size: int64(len(data)),
+		Visibility: domain.VisibilityPrivate, ContentHash: hash, TakenAt: s.Meta.TakenAt(data),
+		UploadedBy: uploader, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := s.Images.Insert(ownerUserID, img, key); err != nil {
+		_ = s.Store.Delete(key)
+		return domain.Image{}, fmt.Errorf("save metadata: %w", err)
+	}
+	return s.Images.GetOwned(ownerUserID, id)
+}
+
+func (s *Service) Copy(userID, imageID, targetFolderID string) (domain.Image, error) {
+	if _, err := s.Images.GetOwned(userID, imageID); err != nil {
+		return domain.Image{}, err
+	}
+	meta, err := s.Images.GetFileMeta(imageID)
+	if err != nil {
+		return domain.Image{}, err
+	}
+	if meta.Deleted {
+		return domain.Image{}, domain.ErrNotFound
+	}
+	obj, err := s.Store.Open(meta.StorageKey)
+	if err != nil {
+		return domain.Image{}, err
+	}
+	defer obj.Body.Close()
+	data, err := io.ReadAll(obj.Body)
+	if err != nil {
+		return domain.Image{}, err
+	}
+	return s.Upload(userID, targetFolderID, meta.Name, meta.MimeType, data)
 }
 
 func (s *Service) Update(userID, id string, upd domain.ImageUpdate) (domain.Image, error) {

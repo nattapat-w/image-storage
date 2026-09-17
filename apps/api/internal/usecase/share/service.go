@@ -18,9 +18,14 @@ type Service struct {
 	Store   port.BlobStore
 }
 
-func (s *Service) Create(userID, resourceType, resourceID string) (domain.Share, error) {
+func (s *Service) Create(userID, resourceType, resourceID string, expiresAt *string) (domain.Share, error) {
 	if resourceType != domain.ResourceImage && resourceType != domain.ResourceFolder {
 		return domain.Share{}, domain.ErrInvalidInput
+	}
+	if expiresAt != nil && *expiresAt != "" {
+		if t, err := time.Parse(time.RFC3339, *expiresAt); err != nil || !t.After(time.Now().UTC()) {
+			return domain.Share{}, &domain.InputError{Message: "expiresAt must be a future ISO8601 time"}
+		}
 	}
 	if !s.Shares.OwnsResource(userID, resourceType, resourceID) {
 		return domain.Share{}, domain.ErrNotFound
@@ -33,7 +38,7 @@ func (s *Service) Create(userID, resourceType, resourceID string) (domain.Share,
 	now := time.Now().UTC().Format(time.RFC3339)
 	share := domain.Share{
 		ID: id, UserID: userID, ResourceType: resourceType,
-		ResourceID: resourceID, Token: token, CreatedAt: now,
+		ResourceID: resourceID, Token: token, ExpiresAt: expiresAt, CreatedAt: now,
 	}
 	if err := s.Shares.Create(share); err != nil {
 		return domain.Share{}, err
@@ -52,6 +57,9 @@ func (s *Service) Delete(userID, id string) error {
 func (s *Service) ViewByToken(token string) (domain.ShareView, error) {
 	share, err := s.Shares.FindByToken(token)
 	if err != nil {
+		return domain.ShareView{}, err
+	}
+	if err := checkShareNotExpired(share); err != nil {
 		return domain.ShareView{}, err
 	}
 	switch share.ResourceType {
@@ -79,6 +87,9 @@ func (s *Service) ViewByToken(token string) (domain.ShareView, error) {
 func (s *Service) CanAccessShareImage(token, imageID string) error {
 	share, err := s.Shares.FindByToken(token)
 	if err != nil {
+		return err
+	}
+	if err := checkShareNotExpired(share); err != nil {
 		return err
 	}
 	if share.ResourceType == domain.ResourceImage {
@@ -109,6 +120,20 @@ func (s *Service) PublicImageFile(id string) (domain.ImageFile, error) {
 
 func (s *Service) OpenFile(meta domain.ImageFile) (port.BlobObject, error) {
 	return s.Store.Open(meta.StorageKey)
+}
+
+func checkShareNotExpired(share domain.Share) error {
+	if share.ExpiresAt == nil || *share.ExpiresAt == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, *share.ExpiresAt)
+	if err != nil {
+		return domain.ErrNotFound
+	}
+	if time.Now().UTC().After(t) {
+		return &domain.InputError{Message: "share link expired"}
+	}
+	return nil
 }
 
 func randomToken() (string, error) {

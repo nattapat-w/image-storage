@@ -9,6 +9,7 @@ import { ImageCardDetails } from "@/components/drive/ImageCardDetails";
 import { ImageThumbWithFavorite } from "@/components/drive/ImageThumbWithFavorite";
 
 import { writeImageDragData } from "@/components/drive/image-drag";
+import { handleImageDoubleClick, handleImagePrimaryClick } from "@/components/drive/image-open";
 import {
   DRIVE_SELECT_SURFACE,
   IMAGE_CARD_SELECT_BORDER_BASE,
@@ -36,7 +37,7 @@ type TimelineViewProps = {
 
   VisibilityBadge: React.ComponentType<{ visibility: string }>;
 
-  ownerLabel: string;
+  posterLabelFor: (img: ImageItem) => string;
 
   showFavoriteStar: boolean;
 
@@ -66,7 +67,7 @@ export function TimelineView({
 
   VisibilityBadge,
 
-  ownerLabel,
+  posterLabelFor,
 
   showFavoriteStar,
 
@@ -126,15 +127,11 @@ export function TimelineView({
 
                 tabIndex={0}
 
-                onClick={(e) => onImageSelectClick(e, img)}
+                onClick={(e) =>
+                  handleImagePrimaryClick(e, img, onImageSelectClick, openPreview)
+                }
 
-                onDoubleClick={(e) => {
-
-                  e.preventDefault();
-
-                  openPreview(img);
-
-                }}
+                onDoubleClick={(e) => handleImageDoubleClick(e, img, openPreview)}
 
                 onKeyDown={(e) => {
 
@@ -173,7 +170,7 @@ export function TimelineView({
                 <div className="mt-2 min-w-0">
                   <ImageCardDetails
                     img={img}
-                    ownerLabel={ownerLabel}
+                    ownerLabel={posterLabelFor(img)}
                     VisibilityBadge={VisibilityBadge}
                     compact
                     isTagging={isImageTagging?.(img.id)}

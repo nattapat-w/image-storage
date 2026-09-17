@@ -1,7 +1,7 @@
 # Product Plan: Share Folder (+ Duplicate Finder bonus)
 
-**Status:** Planning (pre-implementation)  
-**Last updated:** 2026-03-16  
+**Status:** In progress (schema + API + initial UI)  
+**Last updated:** 2026-09-17  
 **Repo:** image-storage monorepo (`apps/web` + `apps/api`)
 
 ---
@@ -410,3 +410,5 @@ Handlers: `sharefolder_handler.go`, extend `folder_handler.go`, `image` ACL, `st
 | 2026-03-16 | Initial plan (family + cleaner). |
 | 2026-03-16 | MVP = family folder; duplicate bonus; clutter removed. |
 | 2026-03-16 | **Renamed to Share Folder** — generic collaborative folder; multiple per account; distinct from link share. |
+| 2026-09-17 | Batch 1: DB schema, sharefolder API, member browse + invite accept UI (branch `feat/share-folder`). |
+| 2026-09-17 | Batch 2–3: owner settings, member upload/ACL, folder zip download (500 MB cap). |

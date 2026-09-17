@@ -11,7 +11,7 @@ func UserFromDomain(u domain.User) User {
 
 func FolderFromDomain(f domain.Folder) Folder {
 	return Folder{
-		ID: f.ID, ParentID: f.ParentID, Name: f.Name,
+		ID: f.ID, ParentID: f.ParentID, Name: f.Name, IsShareFolder: f.IsShareFolder,
 		ImageCount: f.ImageCount, TotalSize: f.TotalSize,
 		CreatedAt: f.CreatedAt, UpdatedAt: f.UpdatedAt,
 	}
@@ -28,7 +28,7 @@ func FoldersFromDomain(in []domain.Folder) []Folder {
 func FolderOptionFromDomain(o domain.FolderOption) FolderOption {
 	return FolderOption{
 		ID: o.ID, Name: o.Name, Path: o.Path,
-		ImageCount: o.ImageCount, TotalSize: o.TotalSize,
+		ImageCount: o.ImageCount, TotalSize: o.TotalSize, IsShareFolder: o.IsShareFolder,
 	}
 }
 
@@ -41,7 +41,8 @@ func ImageFromDomain(img domain.Image) Image {
 		ID: img.ID, FolderID: img.FolderID, Name: img.Name, MimeType: img.MimeType,
 		Size: img.Size, Visibility: img.Visibility, Favorite: img.Favorite,
 		ContentHash: img.ContentHash, TakenAt: img.TakenAt, DeletedAt: img.DeletedAt,
-		Tags: tags, CreatedAt: img.CreatedAt, UpdatedAt: img.UpdatedAt,
+		Tags: tags, UploadedBy: img.UploadedBy,
+		CreatedAt: img.CreatedAt, UpdatedAt: img.UpdatedAt,
 	}
 }
 
@@ -68,7 +69,7 @@ func TagsFromDomain(in []domain.Tag) []Tag {
 func ShareFromDomain(s domain.Share) Share {
 	return Share{
 		ID: s.ID, ResourceType: s.ResourceType, ResourceID: s.ResourceID,
-		Token: s.Token, URL: "/share/" + s.Token, CreatedAt: s.CreatedAt,
+		Token: s.Token, URL: "/share/" + s.Token, ExpiresAt: s.ExpiresAt, CreatedAt: s.CreatedAt,
 	}
 }
 

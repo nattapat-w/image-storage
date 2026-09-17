@@ -83,11 +83,18 @@ export function folderOptionToFolderType(f: FolderOption): FolderType {
     id: f.id,
     parentId: null,
     name: f.name,
+    isShareFolder: f.isShareFolder,
     imageCount: f.imageCount,
     totalSize: f.totalSize,
     createdAt: "",
     updatedAt: "",
   };
+}
+
+export function imagePosterLabel(img: ImageItem, fallback: string): string {
+  const name = img.uploadedByDisplayName?.trim();
+  if (name) return name;
+  return fallback;
 }
 
 export function formatDriveDate(iso: string) {

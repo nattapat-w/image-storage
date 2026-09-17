@@ -27,6 +27,9 @@ func (s *Service) Create(userID, name string, parentID *string) (domain.Folder, 
 		if !s.Folders.Owns(userID, *parentID) {
 			return domain.Folder{}, domain.ErrForbidden
 		}
+		if err := s.ensureCreateDepthOK(userID, *parentID); err != nil {
+			return domain.Folder{}, err
+		}
 	} else {
 		parentID = nil
 	}
@@ -69,11 +72,97 @@ func (s *Service) Update(userID, id string, name *string, parentID *string, upda
 		if parentID != nil && *parentID != "" {
 			p = parentID
 		}
+		if err := s.ensureMoveDepthOK(userID, id, p); err != nil {
+			return domain.Folder{}, err
+		}
 		if err := s.Folders.UpdateParent(userID, id, p, now); err != nil {
 			return domain.Folder{}, err
 		}
 	}
 	return s.Folders.Get(userID, id)
+}
+
+func (s *Service) ensureCreateDepthOK(userID, parentID string) error {
+	parentDepth, err := s.folderDepth(userID, parentID)
+	if err != nil {
+		return err
+	}
+	if parentDepth+1 > domain.MaxFolderNesting {
+		return &domain.InputError{Message: domain.FolderNestingLimitMessage}
+	}
+	return nil
+}
+
+func (s *Service) ensureMoveDepthOK(userID, folderID string, newParentID *string) error {
+	rows, err := s.Folders.ListRows(userID)
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]domain.FolderRow, len(rows))
+	for _, row := range rows {
+		byID[row.ID] = row
+	}
+	baseDepth := 0
+	if newParentID != nil && *newParentID != "" {
+		d, err := s.folderDepth(userID, *newParentID)
+		if err != nil {
+			return err
+		}
+		baseDepth = d
+	}
+	span := subtreeDepthSpan(folderID, byID)
+	if baseDepth+span > domain.MaxFolderNesting {
+		return &domain.InputError{Message: domain.FolderNestingLimitMessage}
+	}
+	return nil
+}
+
+func (s *Service) folderDepth(userID, folderID string) (int, error) {
+	depth := 0
+	current := folderID
+	seen := make(map[string]bool)
+	for current != "" {
+		if seen[current] {
+			return 0, domain.ErrInvalidInput
+		}
+		seen[current] = true
+		depth++
+		f, err := s.Folders.Get(userID, current)
+		if err != nil {
+			return 0, err
+		}
+		if f.ParentID == nil || *f.ParentID == "" {
+			break
+		}
+		current = *f.ParentID
+	}
+	return depth, nil
+}
+
+func subtreeDepthSpan(rootID string, byID map[string]domain.FolderRow) int {
+	byParent := make(map[string][]string)
+	for id, row := range byID {
+		parent := ""
+		if row.ParentID != nil {
+			parent = *row.ParentID
+		}
+		byParent[parent] = append(byParent[parent], id)
+	}
+	var walk func(id string) int
+	walk = func(id string) int {
+		children := byParent[id]
+		if len(children) == 0 {
+			return 1
+		}
+		best := 0
+		for _, child := range children {
+			if d := walk(child); d > best {
+				best = d
+			}
+		}
+		return 1 + best
+	}
+	return walk(rootID)
 }
 
 func (s *Service) isDescendant(userID, folderID, ancestorID string) bool {
@@ -145,7 +234,9 @@ func (s *Service) ListAll(userID string) ([]domain.FolderOption, error) {
 	stats, _ := s.Folders.StatsByUser(userID)
 	out := make([]domain.FolderOption, 0, len(items))
 	for _, item := range items {
-		opt := domain.FolderOption{ID: item.ID, Name: item.Name, Path: pathFor(item.ID)}
+		opt := domain.FolderOption{
+			ID: item.ID, Name: item.Name, Path: pathFor(item.ID), IsShareFolder: item.IsShareFolder,
+		}
 		if st, ok := stats[item.ID]; ok {
 			opt.ImageCount = st.ImageCount
 			opt.TotalSize = st.TotalSize

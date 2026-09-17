@@ -20,7 +20,7 @@ func (r *TagRepo) ListByUser(userID string) ([]domain.Tag, error) {
 		LEFT JOIN images i ON i.id = it.image_id AND i.deleted_at IS NULL
 		WHERE t.user_id = ?
 		GROUP BY t.id, t.name
-		ORDER BY t.name`, userID)
+		ORDER BY cnt DESC, t.name`, userID)
 	if err != nil {
 		return nil, err
 	}

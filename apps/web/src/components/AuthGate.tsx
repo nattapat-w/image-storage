@@ -1,16 +1,27 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
+import { getToken } from "@/lib/api";
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const hasSession = Boolean(user && getToken());
 
   useEffect(() => {
-    if (!loading && !user) router.replace("/login");
-  }, [loading, user, router]);
+    if (!loading && !hasSession) {
+      const next = `${pathname}${searchParams.toString() ? `?${searchParams}` : ""}`;
+      const q =
+        next.startsWith("/") && !next.startsWith("/login")
+          ? `?next=${encodeURIComponent(next)}`
+          : "";
+      router.replace(`/login${q}`);
+    }
+  }, [loading, hasSession, router, pathname, searchParams]);
 
   if (loading) {
     return (
@@ -19,6 +30,6 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!user) return null;
+  if (!hasSession) return null;
   return <>{children}</>;
 }

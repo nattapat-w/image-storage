@@ -7,10 +7,11 @@ import { cn } from "@/lib/utils";
 type DriveBreadcrumbsProps = {
   crumbs: Breadcrumb[];
   onNavigate: (folderId: string | undefined) => void;
+  rootLabel?: string;
   className?: string;
 };
 
-export function DriveBreadcrumbs({ crumbs, onNavigate, className }: DriveBreadcrumbsProps) {
+export function DriveBreadcrumbs({ crumbs, onNavigate, rootLabel = "My Drive", className }: DriveBreadcrumbsProps) {
   return (
     <nav
       className={cn("flex min-w-0 flex-1 items-center gap-0.5 text-base leading-tight text-[var(--header-primary)] sm:text-[20px]", className)}
@@ -21,7 +22,7 @@ export function DriveBreadcrumbs({ crumbs, onNavigate, className }: DriveBreadcr
         className="max-w-[36vw] truncate rounded-md px-1 py-0.5 font-normal hover:bg-[var(--modifier-hover)] sm:max-w-[40vw] sm:px-1.5"
         onClick={() => onNavigate(undefined)}
       >
-        My Drive
+        {rootLabel}
       </button>
       {crumbs.map((c) => (
         <span key={c.id} className="flex min-w-0 items-center gap-0.5">

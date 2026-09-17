@@ -13,6 +13,7 @@ import (
 	"image-storage/apps/api/internal/adapter/http/dto"
 	"image-storage/apps/api/internal/domain"
 	"image-storage/apps/api/internal/httpx"
+	"image-storage/apps/api/internal/port"
 	autotaguc "image-storage/apps/api/internal/usecase/autotag"
 	folderuc "image-storage/apps/api/internal/usecase/folder"
 	imageuc "image-storage/apps/api/internal/usecase/image"
@@ -22,7 +23,14 @@ type ImageHandler struct {
 	Images         *imageuc.Service
 	Folders        *folderuc.Service
 	AutoTag        *autotaguc.Service
+	Users          port.UserRepository
 	EnableDevTools bool
+}
+
+func (h *ImageHandler) imageDTO(img domain.Image) dto.Image {
+	out := dto.ImageFromDomain(img)
+	dto.EnrichImageUploader(&out, h.Users.FindByID)
+	return out
 }
 
 func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +48,9 @@ func (h *ImageHandler) List(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, dto.ImagesFromDomain(out))
+	imgs := dto.ImagesFromDomain(out)
+	dto.EnrichImageUploaders(imgs, h.Users.FindByID)
+	httpx.WriteJSON(w, http.StatusOK, imgs)
 }
 
 func (h *ImageHandler) Timeline(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +60,11 @@ func (h *ImageHandler) Timeline(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, dto.TimelineFromDomain(groups))
+	timeline := dto.TimelineFromDomain(groups)
+	for i := range timeline {
+		dto.EnrichImageUploaders(timeline[i].Images, h.Users.FindByID)
+	}
+	httpx.WriteJSON(w, http.StatusOK, timeline)
 }
 
 func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
@@ -80,7 +94,7 @@ func (h *ImageHandler) Upload(w http.ResponseWriter, r *http.Request) {
 	if h.AutoTag != nil {
 		h.AutoTag.AfterUpload(userID, img.ID, data)
 	}
-	httpx.WriteJSON(w, http.StatusCreated, dto.ImageFromDomain(img))
+	httpx.WriteJSON(w, http.StatusCreated, h.imageDTO(img))
 }
 
 func (h *ImageHandler) Get(w http.ResponseWriter, r *http.Request) {
@@ -90,7 +104,7 @@ func (h *ImageHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, dto.ImageFromDomain(img))
+	httpx.WriteJSON(w, http.StatusOK, h.imageDTO(img))
 }
 
 func (h *ImageHandler) Download(w http.ResponseWriter, r *http.Request) {
@@ -112,6 +126,23 @@ func (h *ImageHandler) ImageURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeCDNURL(w, meta, "private", cdnTTLPrivate, "/api/images/"+id+"/file", false)
+}
+
+func (h *ImageHandler) Copy(w http.ResponseWriter, r *http.Request) {
+	userID, _ := jwtauth.UserIDFromContext(r.Context())
+	var body struct {
+		FolderID string `json:"folderId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid json")
+		return
+	}
+	img, err := h.Images.Copy(userID, chi.URLParam(r, "id"), body.FolderID)
+	if err != nil {
+		WriteError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, h.imageDTO(img))
 }
 
 func (h *ImageHandler) Update(w http.ResponseWriter, r *http.Request) {
@@ -136,7 +167,7 @@ func (h *ImageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, dto.ImageFromDomain(img))
+	httpx.WriteJSON(w, http.StatusOK, h.imageDTO(img))
 }
 
 func (h *ImageHandler) Delete(w http.ResponseWriter, r *http.Request) {
@@ -155,7 +186,7 @@ func (h *ImageHandler) Restore(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, err)
 		return
 	}
-	httpx.WriteJSON(w, http.StatusOK, dto.ImageFromDomain(img))
+	httpx.WriteJSON(w, http.StatusOK, h.imageDTO(img))
 }
 
 func (h *ImageHandler) DeletePermanent(w http.ResponseWriter, r *http.Request) {
